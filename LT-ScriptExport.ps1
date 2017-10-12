@@ -692,7 +692,7 @@ Function Export-LTScript {
         $ScriptIDs = Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
     }
     else{
-        $Query = $("SELECT ScriptID FROM lt_scripts WHERE Last_Date > " + "'" + $($Config.Settings.LastExport) +"'")
+        $Query = $("SELECT ScriptID FROM lt_scripts WHERE Last_Date > " + "'" + $($Config.Settings.LastExport) +"' order by ScriptID")
         $ScriptIDs = Get-LTData $Query   
     }
     
