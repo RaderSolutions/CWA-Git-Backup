@@ -493,9 +493,9 @@ Function Update-TableOfContents {
         [string]$FileName
     )
 
-    $Depth = 0
+    "## Use this table of contents to jump to details of a script" | Out-File $FileName 
     $ToCData = Write-FolderTree -Depth 0 -ParentID 0
-    $ToCData | Out-File $FileName
+    $ToCData | Out-File $FileName -Append
 }
 
 Function Write-FolderTree {
@@ -522,6 +522,7 @@ Writes the folder structure in ASCII, with the initial indention of the Depth pa
     
     foreach($Folder in $Folders){
         # Output this folder at the right level
+        <#
         "<details><summary>"
         if($Folder.FolderId -ne $Folders[$Folders.count - 1].FolderID){
             "-"*$Depth + "+" + "-" + $Folder.name
@@ -530,15 +531,20 @@ Writes the folder structure in ASCII, with the initial indention of the Depth pa
         }
         "</summary>"
         ""
+        #>
+        # insert newline before each folder
+        " "
+        ">"*$Depth + $Folder.name + "  "
 
         # Insert all folders inside of this folder
         Write-FolderTree -Depth ($Depth + 1) -ParentID $Folder.FolderID
         # Insert
         $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=$($Folder.FolderID) ORDER BY ScriptName "
         foreach($FolderScript in $FolderScripts){
-            "-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml) <br>"
+            #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml) <br>"
+            ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml)" + "  "
         }
-        "</details>"
+        #"</details>"
     }
 }
 
@@ -805,7 +811,7 @@ Function Export-LTScript {
         Export-LTScript -ScriptID $($ScriptID.ScriptID)
     }
 
-    if($n -gt 0){
+    if($n -gt -1){
         Update-TableOfContents -FileName "$BackupRoot\ToC.md"
     }
 
