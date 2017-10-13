@@ -32,6 +32,11 @@
 
 #Requires -Version 3.0 
  
+Param(
+    [bool]$EmptyFolderOverride = $false,
+    [bool]$ForceFullExport = $false,
+    [bool]$RebuildGitConfig = $false
+)
 #region-[Declarations]----------------------------------------------------------
     
     $ScriptVersion = "1.1"
@@ -57,8 +62,8 @@
             #Create config file
             $Config.Settings.LogPath = "$(Read-Host "Path of log file ($($env:windir)\LTSvc\Logs)")"
             if ($Config.Settings.LogPath -eq '') {$Config.Settings.LogPath = "$($env:windir)\LTSvc\Logs"}
-            $Config.Settings.BackupRoot = "$(Read-Host "Path of exported scripts (${env:ProgramFiles(x86)}\LabTech\Backup\Scripts)")"
-            if ($Config.Settings.BackupRoot -eq '') {$Config.Settings.BackupRoot = "${env:ProgramFiles(x86)}\LabTech\Backup\Scripts"}
+            $Config.Settings.BackupRoot = "$(Read-Host "Path of exported scripts (${env:ProgramFiles}\LabTech\Backup\Scripts)")"
+            if ($Config.Settings.BackupRoot -eq '') {$Config.Settings.BackupRoot = "${env:ProgramFiles}\LabTech\Backup\Scripts"}
             $Config.Settings.MySQLDatabase = "$(Read-Host "Name of LabTech database (labtech)")"
             if ($Config.Settings.MySQLDatabase -eq '') {$Config.Settings.MySQLDatabase = "labtech"}
             $Config.Settings.MySQLHost = "$(Read-Host "FQDN of LabTechServer (localhost)")"
@@ -99,6 +104,11 @@
     $MySQLAdminPassword = (IMPORT-CLIXML "$CredPath\LTDBCredentials.xml").GetNetworkCredential().Password
     $MySQLAdminUserName = (IMPORT-CLIXML "$CredPath\LTDBCredentials.xml").GetNetworkCredential().UserName
 
+
+    if($ForceFullExport){
+        $Config.Settings.LastExport = "0"
+        $EmptyFolderOverride = $true
+    }
 #endregion
  
 #region-[Functions]------------------------------------------------------------
@@ -749,9 +759,9 @@ Function Export-LTScript {
             
             ## insert ignored XML lines to document some metadata:
             $ScriptMetadata = @()
-            $ScriptMetadata += "<!-- Full script path: $FolderName\$($ScriptXML.ScriptName) -->"
-            $ScriptMetadata += "<!-- Script last modified: $($ScriptXML.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss")) -->"
-            $ScriptMetadata += "<!-- Script last user: $($ScriptXML.Last_User.Substring(0, $ScriptXML.Last_User.IndexOf('@'))) -->"
+            $ScriptMetadata += "<!-- Full script path: $FolderName\$($ScriptXML.ScriptName) : -->"
+            $ScriptMetadata += "<!-- Script last user: $($ScriptXML.Last_User.Substring(0, $ScriptXML.Last_User.IndexOf('@'))) : -->"
+            $ScriptMetadata += "<!-- Script last modified: $($ScriptXML.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss")) : -->"
             $FileContent = Get-Content $FileName
             Set-Content $FileName -Value $ScriptMetadata,$FileContent
 
@@ -766,11 +776,32 @@ Function Export-LTScript {
 
 }
 
+Function Rebuild-GitConfig {
+    Remove-Item -Recurse -Force "$BackupRoot\.git" -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$BackupRoot.old" -ErrorAction SilentlyContinue
+    
+    Move-Item "$BackupRoot" "$BackupRoot.old" -Force
+    mkdir "$BackupRoot"
+
+    $RepoUrl = Read-Host "Enter the remote URL for git Repo. Include credentials in url (NOT primary creds, as this is not stored safely). I.E. https://username:password@github.com/user/repo.git" 
+    git.exe clone $RepoURL $BackupRoot
+    
+    Move-Item "$BackupRoot.old" "$BackupRoot"
+}
+
 #endregion
 
 #region-[Execution]------------------------------------------------------------
     $scriptStartTime = Get-Date
+
+    
+
     try {
+
+        if($RebuildGitConfig -eq $true){
+            Rebuild-GitConfig
+        }
+
     #Create log
     Log-Start -LogPath $LogPath -LogName $LogName -ScriptVersion $ScriptVersion -Append
    
@@ -788,7 +819,7 @@ Function Export-LTScript {
     $ScriptIDs = @{}
     #Query list of all ScriptID's
     if ($($Config.Settings.LastExport) -eq 0) {
-        if((Get-ChildItem -Recurse -File $BackupRoot | Measure-Object).count -gt 0){
+        if((Get-ChildItem -Directory $BackupRoot | Get-ChildItem -File | Measure-Object).count -gt 0 -and $EmptyFolderOverride -eq $false){
             Log-Write -FullLogPath $FullLogPath -LineValue "No last export implies all scripts should be exported, but the directory is not empty"
         }else{
             $ScriptIDs = Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
@@ -800,6 +831,12 @@ Function Export-LTScript {
     }
     
     Log-Write -FullLogPath $FullLogPath -LineValue "$(@($ScriptIDs).count) scripts to process."
+    if(Test-Path "$BackupRoot\.git"){
+        "Git config found, doing a pull"
+        Set-Location $BackupRoot
+        git.exe reset --hard
+        git.exe pull --rebase 
+    }
 
     #Process each ScriptID
     $n = 0
@@ -812,7 +849,7 @@ Function Export-LTScript {
         Export-LTScript -ScriptID $($ScriptID.ScriptID)
     }
 
-    if($n -gt -1){
+    if($n -gt 0){
         Update-TableOfContents -FileName "$BackupRoot\ToC.md"
     }
 
@@ -828,18 +865,42 @@ Function Export-LTScript {
             Log-Error -FullLogPath $FullLogPath  -ErrorDesc "Unable to update config with last export date: $FailedItem, $ErrorMessage" -ExitGracefully $True
         }
 
-    Log-Finish -FullLogPath $FullLogPath -Limit 50000
+    ## Commit git changes    
+    if(Test-Path "$BackupRoot\.git"){
+        "Git config found, doing a push"
 
-    $gitExe = which.exe gits.exe
-    if($gitExe){
-        "Git found, doing a push"
+        <#
+            Init this directory before first run with RebuildGitConfig parameter
+            
+            This will create a .git folder to begin tracking the repo
+        #>
         
+        Set-Location $BackupRoot
 
         $scriptDirs = Get-ChildItem $BackupRoot -Directory | ? name -ge 0
+        $changedFiles = @()
         foreach($scriptDir in $scriptDirs){
-            $changedFiles += Get-ChildItem $scriptDir | ? LastWriteTime -gt $scriptStartTime
+            $changedFiles += Get-ChildItem $scriptDir | ? LastWriteTime -gt $scriptStartTime | select @{n='RelativePath';e={Resolve-Path -Relative $_.FullName}},
+                                @{n='User';e={(Get-Content $file.fullname | select -f 2 | select -l 1 | %{$_.split(":")[1].trim()})}}
         }
+
+        ## push a commit for each LT user that modified scripts
+        foreach($user in $($changedFiles | Group-Object User).Name){
+            $changedFiles | ? User -eq $user | %{git.exe add "$($_.RelativePath)"}
+            git.exe commit -m "Modified by LT User $user"
+        }
+
+        ## push the rest of the changed files
+        Get-ChildItem -File $BackupRoot | %{
+            git.exe add --all
+            git.exe commit -m "Various files"
+        }
+        git.exe push
     }else{
         "Git not found"
     }
+
+    Log-Finish -FullLogPath $FullLogPath -Limit 50000
+
+
 #endregion
