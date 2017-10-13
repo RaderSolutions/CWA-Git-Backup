@@ -881,7 +881,7 @@ Function Rebuild-GitConfig {
         $changedFiles = @()
         foreach($scriptDir in $scriptDirs){
             $changedFiles += Get-ChildItem $scriptDir | ? LastWriteTime -gt $scriptStartTime | select @{n='RelativePath';e={Resolve-Path -Relative $_.FullName}},
-                                @{n='User';e={(Get-Content $file.fullname | select -f 2 | select -l 1 | %{$_.split(":")[1].trim()})}}
+                                @{n='User';e={(Get-Content $_.fullname | select -f 2 | select -l 1 | %{$_.split(":")[1].trim()})}}
         }
 
         ## push a commit for each LT user that modified scripts
