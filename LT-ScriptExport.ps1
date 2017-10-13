@@ -445,6 +445,109 @@ Function Get-LTData {
     }
 }
 
+Function Unpack-LTXML {
+    <#
+    .SYNOPSIS
+        Unpacks an LT XML export to include ScriptData and LicenseData in human-readable format.
+
+    .DESCRIPTION
+        This commandlet will read an LT XML file and replace ScriptData and LicenseData
+         
+    .PARAMETER FileName
+        Full name of exported XML script. Will be read and re-written as $FileName -replace "\.xml$",".unpacked.xml"
+
+    .NOTES
+        
+  
+    .EXAMPLE
+        Unpack-LTXML -FileName c:\test\ltscript.xml
+    #>
+
+    [CmdletBinding()]
+        Param(
+        [Parameter(Mandatory=$True,Position=1)]
+        [string]$FileName
+    )
+
+}
+
+Function Update-TableOfContents {
+    <#
+    .SYNOPSIS
+        Creates a table of contents for the LT scripts. This will capture script moves as well as provide links to the script xml
+
+             
+    .PARAMETER FileName
+        Full name of ToC file. 
+
+    .NOTES
+        
+  
+    .EXAMPLE
+        Update-TableOfContents -FileName c:\test\ToC.md
+    #>
+
+    [CmdletBinding()]
+        Param(
+        [Parameter(Mandatory=$True,Position=1)]
+        [string]$FileName
+    )
+
+    "## Use this table of contents to jump to details of a script" | Out-File $FileName 
+    $ToCData = Write-FolderTree -Depth 0 -ParentID 0
+    $ToCData | Out-File $FileName -Append
+}
+
+Function Write-FolderTree {
+    [CmdletBinding()]
+    Param(
+        [Parameter(Mandatory=$True,Position=1)]
+        [string]$Depth,
+        [Parameter(Mandatory=$True,Position=2)]
+        [string]$ParentID
+    )
+    <#
+
+Writes the folder structure in ASCII, with the initial indention of the Depth param:
++---A
+|   +---A
+|   \---B
++---B
+|   \---A
+|       \---A
+\---C
+
+    #>
+    $Folders = Get-LTData -query "SELECT * FROM scriptfolders WHERE ParentID=$ParentID ORDER BY name "
+    
+    foreach($Folder in $Folders){
+        # Output this folder at the right level
+        <#
+        "<details><summary>"
+        if($Folder.FolderId -ne $Folders[$Folders.count - 1].FolderID){
+            "-"*$Depth + "+" + "-" + $Folder.name
+        }else{
+            "-"*$Depth + "\" + "-" + $Folder.name
+        }
+        "</summary>"
+        ""
+        #>
+        # insert newline before each folder
+        " "
+        ">"*$Depth + $Folder.name + "  "
+
+        # Insert all folders inside of this folder
+        Write-FolderTree -Depth ($Depth + 1) -ParentID $Folder.FolderID
+        # Insert
+        $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=$($Folder.FolderID) ORDER BY ScriptName "
+        foreach($FolderScript in $FolderScripts){
+            #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml) <br>"
+            ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml)" + "  "
+        }
+        #"</details>"
+    }
+}
+
 Function Export-LTScript {
     <#
     .SYNOPSIS
@@ -525,8 +628,10 @@ Function Export-LTScript {
     $ScriptXML = Get-LTData -query "SELECT * FROM lt_scripts WHERE ScriptID=$ScriptID"
     $ScriptData = Get-LTData -query "SELECT CONVERT(ScriptData USING utf8) AS Data FROM lt_scripts WHERE ScriptID=$ScriptID"
     $ScriptLicense = Get-LTData -query "SELECT CONVERT(LicenseData USING utf8) AS License FROM lt_scripts WHERE ScriptID=$ScriptID"
+    $LTVersion = Get-LTData -Query "SELECT CONCAT(majorversion,'.',minorversion) AS LTVersion FROM config"
 
     #Save script data to the template.
+    $ExportTemplate.LabTech_Expansion.Version = "$($LTVersion.LTVersion)"
     $ExportTemplate.LabTech_Expansion.PackedScript.NewDataSet.Table.ScriptId = "$($ScriptXML.ScriptId)"
     $ExportTemplate.LabTech_Expansion.PackedScript.NewDataSet.Table.FolderId = "$($ScriptXML.FolderId)"
     $ExportTemplate.LabTech_Expansion.PackedScript.NewDataSet.Table.ScriptName = "$($ScriptXML.ScriptName)"
@@ -543,22 +648,6 @@ Function Export-LTScript {
     $ExportTemplate.LabTech_Expansion.PackedScript.NewDataSet.Table.ScriptGuid = "$($ScriptXML.ScriptGuid)"
     $ExportTemplate.LabTech_Expansion.PackedScript.NewDataSet.Table.ScriptFlags = "$($ScriptXML.ScriptFlags)"
     $ExportTemplate.LabTech_Expansion.PackedScript.NewDataSet.Table.Parameters = "$($ScriptXML.Parameters)"
-    
-    #Format Script Name
-    #Remove special characters
-    $FileName = $($ScriptXML.ScriptName).Replace('*','')
-    $FileName = $FileName.Replace('/','-')
-    $FileName = $FileName.Replace('<','')
-    $FileName = $FileName.Replace('>','')
-    $FileName = $FileName.Replace(':','')
-    $FileName = $FileName.Replace('"','')
-    $FileName = $FileName.Replace('\','-')
-    $FileName = $FileName.Replace('|','')
-    $FileName = $FileName.Replace('?','')
-    #Add last modification date
-    $FileName = $($FileName) + '--' + $($ScriptXML.Last_Date.ToString("yyyy-MM-dd--HH-mm-ss"))
-    #Add last user to modify
-    $FileName = $($FileName) + '--' + $($ScriptXML.Last_User.Substring(0, $ScriptXML.Last_User.IndexOf('@')))
     
 
     #Check folder information
@@ -614,57 +703,66 @@ Function Export-LTScript {
                 # Save folder data to the template.
                 $ExportTemplate.LabTech_Expansion.PackedScript.ScriptFolder.NewDataSet.Table.FolderID = "$($FolderData.FolderID)"
                 $ExportTemplate.LabTech_Expansion.PackedScript.ScriptFolder.NewDataSet.Table.ParentID = "$($FolderData.ParentID)"
-                $ExportTemplate.LabTech_Expansion.PackedScript.ScriptFolder.NewDataSet.Table.Name = "$FolderName"
+                $ExportTemplate.LabTech_Expansion.PackedScript.ScriptFolder.NewDataSet.Table.Name = "$($FolderData.name)"
                 $ExportTemplate.LabTech_Expansion.PackedScript.ScriptFolder.NewDataSet.Table.GUID = "$($FolderData.GUID)"
+
+                $ParentFolderData = Get-LTData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($FolderData.ParentID)"
+                while($ParentFolderData -ne $null){
+                    #echo $ScriptXML.scriptid
+                    
+                    # Save folder data to the template.
+                    
+                    [xml]$ScriptFolderXML = @"
+<LabTech_Expansion>
+     <PackedScript>
+     <ScriptFolder>
+      <NewDataSet>
+        <Table>
+          <FolderID>$($ParentFolderData.FolderID)</FolderID>
+          <ParentID>$($ParentFolderData.ParentID)</ParentID>
+          <Name>$($ParentFolderData.name)</Name>
+          <GUID>$($ParentFolderData.GUID)</GUID>
+        </Table>
+      </NewDataSet>
+    </ScriptFolder>
+  </PackedScript>
+</LabTech_Expansion>
+"@
+
+
+                    $null = $ExportTemplate.LabTech_Expansion.PackedScript.AppendChild($ExportTemplate.ImportNode($ScriptFolderXML.LabTech_Expansion.PackedScript, $true))
+                    
+                    $ParentFolderData = Get-LTData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($ParentFolderData.ParentID)"
+                }
             }
     }
 
-    #Create Folder Structure. Check for parent folder 
-    If ($($FolderData.ParentId) -eq 0 -or !$($FolderData.ParentId)) {
-        try {
-            #Create folder
-            New-Item -ItemType Directory -Force -Path "$BackupRoot\$($ExportTemplate.LabTech_Expansion.PackedScript.ScriptFolder.NewDataSet.Table.Name)" | Out-Null
-        
-            #Save XML
-            $ExportTemplate.Save("$BackupRoot\$FolderName\$($FileName).xml")
-        }
-        Catch {
-            $ErrorMessage = $_.Exception.Message
-            $FailedItem = $_.Exception.ItemName
-            Log-Error -FullLogPath $FullLogPath  -ErrorDesc "Unable to save script: $FailedItem, $ErrorMessage" -ExitGracefully $True
-        }
-    }
-    Else {
-        #Query info for parent folder
-        $ParentFolderName = $(Get-LTData "SELECT * FROM scriptfolders WHERE FolderID=$($FolderData.ParentID)").Name
-
-        #Format parent folder name
-        #Remove special characters
-        $ParentFolderName = $ParentFolderName.Replace('*','')
-        $ParentFolderName = $ParentFolderName.Replace('/','-')
-        $ParentFolderName = $ParentFolderName.Replace('<','')
-        $ParentFolderName = $ParentFolderName.Replace('>','')
-        $ParentFolderName = $ParentFolderName.Replace(':','')
-        $ParentFolderName = $ParentFolderName.Replace('"','')
-        $ParentFolderName = $ParentFolderName.Replace('\','-')
-        $ParentFolderName = $ParentFolderName.Replace('|','')
-        $ParentFolderName = $ParentFolderName.Replace('?','')
-
-        $FilePath = "$BackupRoot\$($ParentFolderName)\$($($FolderData.Name))"
-
-        try {
+    # Always write into base directory
+        try{
+            $FilePath = "$BackupRoot\$([int]($ScriptXML.ScriptID / 100) * 100)"
             #Create folder
             New-Item -ItemType Directory -Force -Path $FilePath | Out-Null
         
             #Save XML
-            $ExportTemplate.Save("$FilePath\$($FileName).xml")
+            $FileName = "$FilePath\$($ScriptXML.ScriptId).xml"
+            $ExportTemplate.Save($FileName)
+            
+            ## insert ignored XML lines to document some metadata:
+            $ScriptMetadata = @()
+            $ScriptMetadata += "<!-- Full script path: $FolderName\$($ScriptXML.ScriptName) -->"
+            $ScriptMetadata += "<!-- Script last modified: $($ScriptXML.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss")) -->"
+            $ScriptMetadata += "<!-- Script last user: $($ScriptXML.Last_User.Substring(0, $ScriptXML.Last_User.IndexOf('@'))) -->"
+            $FileContent = Get-Content $FileName
+            Set-Content $FileName -Value $ScriptMetadata,$FileContent
+
+            Unpack-LTXML -FileName $FileName
         }
         Catch {
             $ErrorMessage = $_.Exception.Message
             $FailedItem = $_.Exception.ItemName
             Log-Error -FullLogPath $FullLogPath  -ErrorDesc "Unable to save script: $FailedItem, $ErrorMessage" -ExitGracefully $True
         }
-    }
+    
 
 }
 
@@ -689,7 +787,11 @@ Function Export-LTScript {
     $ScriptIDs = @{}
     #Query list of all ScriptID's
     if ($($Config.Settings.LastExport) -eq 0) {
-        $ScriptIDs = Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
+        if((Get-ChildItem -Recurse -File $BackupRoot | Measure-Object).count -gt 0){
+            Log-Write -FullLogPath $FullLogPath -LineValue "No last export implies all scripts should be exported, but the directory is not empty"
+        }else{
+            $ScriptIDs = Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
+        }
     }
     else{
         $Query = $("SELECT ScriptID FROM lt_scripts WHERE Last_Date > " + "'" + $($Config.Settings.LastExport) +"' order by ScriptID")
@@ -707,6 +809,10 @@ Function Export-LTScript {
         
         #Export current script
         Export-LTScript -ScriptID $($ScriptID.ScriptID)
+    }
+
+    if($n -gt -1){
+        Update-TableOfContents -FileName "$BackupRoot\ToC.md"
     }
 
     Log-Write -FullLogPath $FullLogPath -LineValue "Export finished."
