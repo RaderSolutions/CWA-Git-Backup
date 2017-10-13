@@ -769,6 +769,7 @@ Function Export-LTScript {
 #endregion
 
 #region-[Execution]------------------------------------------------------------
+    $scriptStartTime = Get-Date
     try {
     #Create log
     Log-Start -LogPath $LogPath -LogName $LogName -ScriptVersion $ScriptVersion -Append
@@ -829,4 +830,16 @@ Function Export-LTScript {
 
     Log-Finish -FullLogPath $FullLogPath -Limit 50000
 
+    $gitExe = which.exe gits.exe
+    if($gitExe){
+        "Git found, doing a push"
+        
+
+        $scriptDirs = Get-ChildItem $BackupRoot -Directory | ? name -ge 0
+        foreach($scriptDir in $scriptDirs){
+            $changedFiles += Get-ChildItem $scriptDir | ? LastWriteTime -gt $scriptStartTime
+        }
+    }else{
+        "Git not found"
+    }
 #endregion
