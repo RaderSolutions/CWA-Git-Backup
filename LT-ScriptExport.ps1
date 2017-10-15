@@ -552,7 +552,7 @@ Writes the folder structure in ASCII, with the initial indention of the Depth pa
         $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=$($Folder.FolderID) ORDER BY ScriptName "
         foreach($FolderScript in $FolderScripts){
             #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml) <br>"
-            ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml)" + "  "
+            ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml) - Last Modified: $($ScriptXML.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
         }
         #"</details>"
     }
@@ -815,7 +815,14 @@ Function Rebuild-GitConfig {
         }
     
     Log-Write -FullLogPath $FullLogPath -LineValue "Getting list of all scripts."
-
+    
+    if(Test-Path "$BackupRoot\.git"){
+        "Git config found, doing a pull"
+        Set-Location $BackupRoot
+        git.exe reset --hard
+        git.exe pull --rebase 
+    }
+    
     $ScriptIDs = @{}
     #Query list of all ScriptID's
     if ($($Config.Settings.LastExport) -eq 0) {
@@ -831,13 +838,7 @@ Function Rebuild-GitConfig {
     }
     
     Log-Write -FullLogPath $FullLogPath -LineValue "$(@($ScriptIDs).count) scripts to process."
-    if(Test-Path "$BackupRoot\.git"){
-        "Git config found, doing a pull"
-        Set-Location $BackupRoot
-        git.exe reset --hard
-        git.exe pull --rebase 
-    }
-
+    
     #Process each ScriptID
     $n = 0
     foreach ($ScriptID in $ScriptIDs) {
