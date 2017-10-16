@@ -504,7 +504,15 @@ Function Update-TableOfContents {
     )
 
     "## Use this table of contents to jump to details of a script" | Out-File $FileName 
-    $ToCData = Write-FolderTree -Depth 0 -ParentID 0
+    $ToCData = @()
+    $ToCData += Write-FolderTree -Depth 0 -ParentID 0
+
+    ## output all scripts at base of script tree (technically possible)
+    $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=0 ORDER BY ScriptName "
+    foreach($FolderScript in $FolderScripts){
+        #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml) <br>"
+        $TOCData += ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml) - Last Modified By: $($FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))) on $($FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
+    }
     $ToCData | Out-File $FileName -Append
 }
 
@@ -548,7 +556,7 @@ Writes the folder structure in ASCII, with the initial indention of the Depth pa
 
         # Insert all folders inside of this folder
         Write-FolderTree -Depth ($Depth + 1) -ParentID $Folder.FolderID
-        # Insert
+        # Insert Script links
         $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=$($Folder.FolderID) ORDER BY ScriptName "
         foreach($FolderScript in $FolderScripts){
             #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml) <br>"
