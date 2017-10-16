@@ -816,7 +816,7 @@ Function Rebuild-GitConfig {
 
     # Build default README.md if it doesn't exist
     if($(Get-Content "$BackupRoot\README.md" -ErrorAction SilentlyContinue | Measure-Object).count -gt 1){
-        # Readme contains more than one line of content
+        # Readme contains more than one line of content. not rebuilding
     }else{
         @"
 ## LabTech script history
@@ -909,7 +909,7 @@ The scripts are sorted into folders based on their script ID, and [a table of co
     Log-Write -FullLogPath $FullLogPath -LineValue "Export finished."
     
     try {
-        $Config.Settings.LastExport = "$($Date.ToString("yyy-MM-dd HH:mm:ss"))"
+        $Config.Settings.LastExport = "$($scriptStartTime.ToString("yyy-MM-dd HH:mm:ss"))"
         $Config.Save("$PSScriptRoot\LT-ScriptExport-Config.xml")
     }
     Catch {
