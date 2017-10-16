@@ -552,7 +552,7 @@ Writes the folder structure in ASCII, with the initial indention of the Depth pa
         $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=$($Folder.FolderID) ORDER BY ScriptName "
         foreach($FolderScript in $FolderScripts){
             #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml) <br>"
-            ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml) - Last Modified By: $($ScriptXML.Last_User.Substring(0, $ScriptXML.Last_User.IndexOf('@'))) on $($FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
+            ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml) - Last Modified By: $($FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))) on $($FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
         }
         #"</details>"
     }
