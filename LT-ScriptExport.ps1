@@ -455,6 +455,76 @@ Function Get-LTData {
     }
 }
 
+function Get-CompressedByteArray {
+    ##############################
+    #.SYNOPSIS
+    #Function pulled from example script: https://gist.github.com/marcgeld/bfacfd8d70b34fdf1db0022508b02aca
+    #
+    #.DESCRIPTION
+    #Long description
+    #
+    #.PARAMETER byteArray
+    #Parameter description
+    #
+    #.EXAMPLE
+    #An example
+    #
+    #.NOTES
+    #General notes
+    ##############################
+    [CmdletBinding()]
+    Param (
+    [Parameter(Mandatory,ValueFromPipeline,ValueFromPipelineByPropertyName)]
+        [byte[]] $byteArray = $(Throw("-byteArray is required"))
+    )
+    Process {
+        Write-Verbose "Get-CompressedByteArray"
+            [System.IO.MemoryStream] $output = New-Object System.IO.MemoryStream
+        $gzipStream = New-Object System.IO.Compression.GzipStream $output, ([IO.Compression.CompressionMode]::Compress)
+            $gzipStream.Write( $byteArray, 0, $byteArray.Length )
+        $gzipStream.Close()
+        $output.Close()
+        $tmp = $output.ToArray()
+        Write-Output $tmp
+    }
+}
+    
+    
+function Get-DecompressedByteArray {
+##############################
+#.SYNOPSIS
+#Function pulled from example script: https://gist.github.com/marcgeld/bfacfd8d70b34fdf1db0022508b02aca
+#
+#.DESCRIPTION
+#Long description
+#
+#.PARAMETER byteArray
+#Parameter description
+#
+#.EXAMPLE
+#An example
+#
+#.NOTES
+#General notes
+##############################
+    [CmdletBinding()]
+    Param (
+        [Parameter(Mandatory,ValueFromPipeline,ValueFromPipelineByPropertyName)]
+        [byte[]] $byteArray = $(Throw("-byteArray is required"))
+    )
+    Process {
+        Write-Verbose "Get-DecompressedByteArray"
+        $input = New-Object System.IO.MemoryStream( , $byteArray )
+        $output = New-Object System.IO.MemoryStream
+        $gzipStream = New-Object System.IO.Compression.GzipStream $input, ([IO.Compression.CompressionMode]::Decompress)
+        $gzipStream.CopyTo( $output )
+        $gzipStream.Close()
+        $input.Close()
+        [byte[]] $byteOutArray = $output.ToArray()
+        Write-Output $byteOutArray
+    }
+}
+
 Function Unpack-LTXML {
     <#
     .SYNOPSIS
@@ -478,7 +548,43 @@ Function Unpack-LTXML {
         [Parameter(Mandatory=$True,Position=1)]
         [string]$FileName
     )
+    #Write-Output "Unpacking script: $FileName"
 
+    [System.Text.Encoding] $enc = [System.Text.Encoding]::UTF8
+    $xmlcontent = [xml](Get-Content $FileName)
+    $scriptdata = $xmlcontent.LabTech_Expansion.PackedScript.NewDataSet.Table.ScriptData
+    [byte[]]$scriptdataByteArray = [System.Convert]::FromBase64String($scriptdata)
+
+
+    $decompressedByteArray = Get-DecompressedByteArray -byteArray $scriptdataByteArray
+
+    $xmlScriptData = [xml]($enc.GetString( $decompressedByteArray ))
+
+    # Replace actionIDs, functionids, etc with names and descriptions
+    . "$PSScriptRoot\constants.ps1"
+
+    foreach($ScriptStep in $($xmlScriptData.ScriptData.ScriptSteps)){
+        foreach($type in "action","FunctionID","Continue","OSLimit"){
+            $typeDetails = $null
+            switch($type){
+                "action" {$typeDetails = $scriptFunctionConstantsPSObject.Actions."$($ScriptStep.$type)"} 
+                "FunctionID" {$typeDetails = $scriptFunctionConstantsPSObject.Functions."$($ScriptStep.$type)".Name}
+                "Continue" {$typeDetails = $scriptFunctionConstantsPSObject.Continues."$($ScriptStep.$type)"}
+                "OSLimit" {$typeDetails = $scriptFunctionConstantsPSObject.OSLimits."$($ScriptStep.$type)"}
+            }
+            
+            if($typeDetails -eq $null ){
+                $typeDetails = "Script step metadata type details unknown for id: $($ScriptStep.$type)"
+            }
+            $ScriptStep.$type = $typeDetails
+        }
+    }
+
+    $null = $xmlcontent.LabTech_Expansion.PackedScript.NewDataSet.Table.AppendChild($xmlcontent.ImportNode($xmlScriptData.ScriptData,$true))
+
+
+
+    $xmlcontent.Save($($FileName -replace "\.xml$",".unpacked.xml"))
 }
 
 Function Update-TableOfContents {
@@ -511,7 +617,7 @@ Function Update-TableOfContents {
     $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=0 ORDER BY ScriptName "
     foreach($FolderScript in $FolderScripts){
         #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).xml) <br>"
-        $TOCData += ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).xml) - Last Modified By: $($FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))) on $($FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
+        $TOCData += ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).unpacked.xml) - Last Modified By: $($FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))) on $($FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
     }
     $ToCData | Out-File $FileName -Append
 }
@@ -560,7 +666,7 @@ Writes the folder structure in ASCII, with the initial indention of the Depth pa
         $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=$($Folder.FolderID) ORDER BY ScriptName "
         foreach($FolderScript in $FolderScripts){
             #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).xml) <br>"
-            ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).xml) - Last Modified By: $($FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))) on $($FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
+            ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).unpacked.xml) - Last Modified By: $($FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))) on $($FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
         }
         #"</details>"
     }
@@ -767,7 +873,7 @@ Function Export-LTScript {
             
             ## insert ignored XML lines to document some metadata:
             $ScriptMetadata = @()
-            $ScriptMetadata += "<!-- Full script path: $FolderName\$($ScriptXML.ScriptName) : -->"
+            $ScriptMetadata += "<!-- Full script path: $("$FolderName\$($ScriptXML.ScriptName)" -replace "--","-") : -->"
             $ScriptMetadata += "<!-- Script last user: $($ScriptXML.Last_User.Substring(0, $ScriptXML.Last_User.IndexOf('@'))) : -->"
             $ScriptMetadata += "<!-- Script last modified: $($ScriptXML.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss")) : -->"
             $FileContent = Get-Content $FileName
@@ -811,7 +917,7 @@ Function Rebuild-GitConfig {
     git.exe clone $RepoURL $BackupRoot
     
     ## Merge old folder back into BackupRoot
-    robocopy.exe "$BackupRoot.old" "$BackupRoot" *.* /s /xo /r:0 /np
+    $null = robocopy.exe "$BackupRoot.old" "$BackupRoot" *.* /s /xo /r:0 /np
     Remove-Item -Recurse -Force "$BackupRoot.old" -ErrorAction SilentlyContinue
 
     # Build default README.md if it doesn't exist
