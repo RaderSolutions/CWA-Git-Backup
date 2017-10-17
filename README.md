@@ -1,6 +1,5 @@
 # LabTech--Script-Backup
-This powershell script (referred to as 'the script' from here on) will backup each LabTech script as an xml file. The script will also create a folder structure based on the ScriptID in LT. These exports will not include files from the transfer directory or any other scripts that are called (these xml files are NOT the same as doing an export from the Control Center)
-The last date and user modified will be prepended to the xml file as comments so that it can be used as version control.
+This powershell script (referred to as 'the script' from here on) will backup each LabTech script as an xml file. The script will also create a folder structure based on the ScriptID in LT. These exports will not include files from the transfer directory or any other scripts that are called (these xml files are NOT the same as doing an export from the Control Center). The last date and user modified will be prepended to the xml file as comments so that it can be used as version control.
 
 The MySQL .NET connector is required.
 https://dev.mysql.com/downloads/connector/net/6.9.html
@@ -20,7 +19,7 @@ The script also contains functionality to push the backup directory to a git rep
 - The requirement is that the local git client is setup such that one can browse to the backup directory and successfully run
   - `git.exe pull`
   - `git.exe push`
-  - `git.exe remove -v`
+  - `git.exe remote -v`
 - There is a crude parameter to set this up using basic credentials in the https git URL: `-RebuildGitConfig`
 
 # LT Script wrapper
