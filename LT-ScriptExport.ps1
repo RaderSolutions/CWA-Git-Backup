@@ -564,6 +564,7 @@ Function Unpack-LTXML {
     . "$PSScriptRoot\constants.ps1"
 
     foreach($ScriptStep in $($xmlScriptData.ScriptData.ScriptSteps)){
+        $null = $ScriptStep.RemoveChild($ScriptStep.SelectSingleNode('Sort'))
         foreach($type in "action","FunctionID","Continue","OSLimit"){
             $typeDetails = $null
             switch($type){
