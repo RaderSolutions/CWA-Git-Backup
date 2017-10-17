@@ -972,8 +972,8 @@ The scripts are sorted into folders based on their script ID, and [a table of co
     if(Test-Path "$BackupRoot\.git"){
         "Git config found, doing a pull"
         Set-Location $BackupRoot
-        git.exe reset --hard
-        git.exe pull --rebase 
+        $null = git.exe reset --hard
+        $null = git.exe pull --rebase 
     }
 
     if($ForceFullExport){
@@ -1045,14 +1045,14 @@ The scripts are sorted into folders based on their script ID, and [a table of co
 
         ## push a commit for each LT user that modified scripts
         foreach($user in $($changedFiles | Group-Object User).Name){
-            $changedFiles | ? User -eq $user | %{git.exe add "$($_.RelativePath)"}
-            git.exe commit -m "Modified by LT User $user"
+            $changedFiles | ? User -eq $user | %{$null = git.exe add "$($_.RelativePath)"}
+            $null = git.exe commit -m "Modified by LT User $user"
         }
 
         ## push the rest of the changed files
         Get-ChildItem -File $BackupRoot | %{
-            git.exe add --all
-            git.exe commit -m "Various files"
+            $null = git.exe add --all
+            $null = git.exe commit -m "Various files"
         }
         git.exe push
     }else{
