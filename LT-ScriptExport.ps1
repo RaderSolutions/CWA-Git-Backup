@@ -32,6 +32,11 @@
 
 #Requires -Version 3.0 
  
+Param(
+    [bool]$EmptyFolderOverride = $false,
+    [bool]$ForceFullExport = $false,
+    [bool]$RebuildGitConfig = $false
+)
 #region-[Declarations]----------------------------------------------------------
     
     $ScriptVersion = "1.1"
@@ -57,8 +62,8 @@
             #Create config file
             $Config.Settings.LogPath = "$(Read-Host "Path of log file ($($env:windir)\LTSvc\Logs)")"
             if ($Config.Settings.LogPath -eq '') {$Config.Settings.LogPath = "$($env:windir)\LTSvc\Logs"}
-            $Config.Settings.BackupRoot = "$(Read-Host "Path of exported scripts (${env:ProgramFiles(x86)}\LabTech\Backup\Scripts)")"
-            if ($Config.Settings.BackupRoot -eq '') {$Config.Settings.BackupRoot = "${env:ProgramFiles(x86)}\LabTech\Backup\Scripts"}
+            $Config.Settings.BackupRoot = "$(Read-Host "Path of exported scripts (${env:ProgramFiles}\LabTech\Backup\Scripts)")"
+            if ($Config.Settings.BackupRoot -eq '') {$Config.Settings.BackupRoot = "${env:ProgramFiles}\LabTech\Backup\Scripts"}
             $Config.Settings.MySQLDatabase = "$(Read-Host "Name of LabTech database (labtech)")"
             if ($Config.Settings.MySQLDatabase -eq '') {$Config.Settings.MySQLDatabase = "labtech"}
             $Config.Settings.MySQLHost = "$(Read-Host "FQDN of LabTechServer (localhost)")"
@@ -99,6 +104,11 @@
     $MySQLAdminPassword = (IMPORT-CLIXML "$CredPath\LTDBCredentials.xml").GetNetworkCredential().Password
     $MySQLAdminUserName = (IMPORT-CLIXML "$CredPath\LTDBCredentials.xml").GetNetworkCredential().UserName
 
+
+    if($ForceFullExport){
+        $Config.Settings.LastExport = "0"
+        $EmptyFolderOverride = $true
+    }
 #endregion
  
 #region-[Functions]------------------------------------------------------------
@@ -445,6 +455,76 @@ Function Get-LTData {
     }
 }
 
+function Get-CompressedByteArray {
+    ##############################
+    #.SYNOPSIS
+    #Function pulled from example script: https://gist.github.com/marcgeld/bfacfd8d70b34fdf1db0022508b02aca
+    #
+    #.DESCRIPTION
+    #Long description
+    #
+    #.PARAMETER byteArray
+    #Parameter description
+    #
+    #.EXAMPLE
+    #An example
+    #
+    #.NOTES
+    #General notes
+    ##############################
+    [CmdletBinding()]
+    Param (
+    [Parameter(Mandatory,ValueFromPipeline,ValueFromPipelineByPropertyName)]
+        [byte[]] $byteArray = $(Throw("-byteArray is required"))
+    )
+    Process {
+        Write-Verbose "Get-CompressedByteArray"
+            [System.IO.MemoryStream] $output = New-Object System.IO.MemoryStream
+        $gzipStream = New-Object System.IO.Compression.GzipStream $output, ([IO.Compression.CompressionMode]::Compress)
+            $gzipStream.Write( $byteArray, 0, $byteArray.Length )
+        $gzipStream.Close()
+        $output.Close()
+        $tmp = $output.ToArray()
+        Write-Output $tmp
+    }
+}
+    
+    
+function Get-DecompressedByteArray {
+##############################
+#.SYNOPSIS
+#Function pulled from example script: https://gist.github.com/marcgeld/bfacfd8d70b34fdf1db0022508b02aca
+#
+#.DESCRIPTION
+#Long description
+#
+#.PARAMETER byteArray
+#Parameter description
+#
+#.EXAMPLE
+#An example
+#
+#.NOTES
+#General notes
+##############################
+    [CmdletBinding()]
+    Param (
+        [Parameter(Mandatory,ValueFromPipeline,ValueFromPipelineByPropertyName)]
+        [byte[]] $byteArray = $(Throw("-byteArray is required"))
+    )
+    Process {
+        Write-Verbose "Get-DecompressedByteArray"
+        $input = New-Object System.IO.MemoryStream( , $byteArray )
+        $output = New-Object System.IO.MemoryStream
+        $gzipStream = New-Object System.IO.Compression.GzipStream $input, ([IO.Compression.CompressionMode]::Decompress)
+        $gzipStream.CopyTo( $output )
+        $gzipStream.Close()
+        $input.Close()
+        [byte[]] $byteOutArray = $output.ToArray()
+        Write-Output $byteOutArray
+    }
+}
+
 Function Unpack-LTXML {
     <#
     .SYNOPSIS
@@ -468,7 +548,43 @@ Function Unpack-LTXML {
         [Parameter(Mandatory=$True,Position=1)]
         [string]$FileName
     )
+    #Write-Output "Unpacking script: $FileName"
 
+    [System.Text.Encoding] $enc = [System.Text.Encoding]::UTF8
+    $xmlcontent = [xml](Get-Content $FileName)
+    $scriptdata = $xmlcontent.LabTech_Expansion.PackedScript.NewDataSet.Table.ScriptData
+    [byte[]]$scriptdataByteArray = [System.Convert]::FromBase64String($scriptdata)
+
+
+    $decompressedByteArray = Get-DecompressedByteArray -byteArray $scriptdataByteArray
+
+    $xmlScriptData = [xml]($enc.GetString( $decompressedByteArray ))
+
+    # Replace actionIDs, functionids, etc with names and descriptions
+    . "$PSScriptRoot\constants.ps1"
+
+    foreach($ScriptStep in $($xmlScriptData.ScriptData.ScriptSteps)){
+        foreach($type in "action","FunctionID","Continue","OSLimit"){
+            $typeDetails = $null
+            switch($type){
+                "action" {$typeDetails = $scriptFunctionConstantsPSObject.Actions."$($ScriptStep.$type)"} 
+                "FunctionID" {$typeDetails = $scriptFunctionConstantsPSObject.Functions."$($ScriptStep.$type)".Name}
+                "Continue" {$typeDetails = $scriptFunctionConstantsPSObject.Continues."$($ScriptStep.$type)"}
+                "OSLimit" {$typeDetails = $scriptFunctionConstantsPSObject.OSLimits."$($ScriptStep.$type)"}
+            }
+            
+            if($typeDetails -eq $null ){
+                $typeDetails = "Script step metadata type details unknown for id: $($ScriptStep.$type)"
+            }
+            $ScriptStep.$type = $typeDetails
+        }
+    }
+
+    $null = $xmlcontent.LabTech_Expansion.PackedScript.NewDataSet.Table.AppendChild($xmlcontent.ImportNode($xmlScriptData.ScriptData,$true))
+
+
+
+    $xmlcontent.Save($($FileName -replace "\.xml$",".unpacked.xml"))
 }
 
 Function Update-TableOfContents {
@@ -494,7 +610,15 @@ Function Update-TableOfContents {
     )
 
     "## Use this table of contents to jump to details of a script" | Out-File $FileName 
-    $ToCData = Write-FolderTree -Depth 0 -ParentID 0
+    $ToCData = @()
+    $ToCData += Write-FolderTree -Depth 0 -ParentID 0
+
+    ## output all scripts at base of script tree (technically possible)
+    $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=0 ORDER BY ScriptName "
+    foreach($FolderScript in $FolderScripts){
+        #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).xml) <br>"
+        $TOCData += ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).unpacked.xml) - Last Modified By: $($FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))) on $($FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
+    }
     $ToCData | Out-File $FileName -Append
 }
 
@@ -538,11 +662,11 @@ Writes the folder structure in ASCII, with the initial indention of the Depth pa
 
         # Insert all folders inside of this folder
         Write-FolderTree -Depth ($Depth + 1) -ParentID $Folder.FolderID
-        # Insert
+        # Insert Script links
         $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=$($Folder.FolderID) ORDER BY ScriptName "
         foreach($FolderScript in $FolderScripts){
-            #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml) <br>"
-            ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([int]($FolderScript.ScriptID / 100) * 100)/$($FolderScript.ScriptID).xml)" + "  "
+            #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).xml) <br>"
+            ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).unpacked.xml) - Last Modified By: $($FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))) on $($FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
         }
         #"</details>"
     }
@@ -739,7 +863,7 @@ Function Export-LTScript {
 
     # Always write into base directory
         try{
-            $FilePath = "$BackupRoot\$([int]($ScriptXML.ScriptID / 100) * 100)"
+            $FilePath = "$BackupRoot\$([math]::floor($ScriptXML.ScriptID / 50) * 50)"
             #Create folder
             New-Item -ItemType Directory -Force -Path $FilePath | Out-Null
         
@@ -749,9 +873,9 @@ Function Export-LTScript {
             
             ## insert ignored XML lines to document some metadata:
             $ScriptMetadata = @()
-            $ScriptMetadata += "<!-- Full script path: $FolderName\$($ScriptXML.ScriptName) -->"
-            $ScriptMetadata += "<!-- Script last modified: $($ScriptXML.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss")) -->"
-            $ScriptMetadata += "<!-- Script last user: $($ScriptXML.Last_User.Substring(0, $ScriptXML.Last_User.IndexOf('@'))) -->"
+            $ScriptMetadata += "<!-- Full script path: $("$FolderName\$($ScriptXML.ScriptName)" -replace "--","-") : -->"
+            $ScriptMetadata += "<!-- Script last user: $($ScriptXML.Last_User.Substring(0, $ScriptXML.Last_User.IndexOf('@'))) : -->"
+            $ScriptMetadata += "<!-- Script last modified: $($ScriptXML.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss")) : -->"
             $FileContent = Get-Content $FileName
             Set-Content $FileName -Value $ScriptMetadata,$FileContent
 
@@ -766,10 +890,71 @@ Function Export-LTScript {
 
 }
 
+Function Rebuild-GitConfig {
+    ##############################
+    #.SYNOPSIS
+    #(re)builds the git configuration for script diffs
+    #
+    #.DESCRIPTION
+    #Prompts user for the repo URL. This repo is then cloned into the backupdirectory and pulled/pushed everytime this script finds changes in LT scripts. 
+    #The URL must have embedded credentials as such: https://<username>:<password>@fqdn.com/repo.git
+    #Push/pull will fail if git config doesn't include credentials
+    #
+    #.EXAMPLE
+    #An example
+    #
+    #.NOTES
+    #General notes
+    ##############################
+
+    Remove-Item -Recurse -Force "$BackupRoot\.git" -ErrorAction SilentlyContinue
+    Remove-Item -Recurse -Force "$BackupRoot.old" -ErrorAction SilentlyContinue
+    
+    Move-Item "$BackupRoot" "$BackupRoot.old" -Force
+    mkdir "$BackupRoot"
+
+    $RepoUrl = Read-Host "Enter the remote URL for git Repo. Include credentials in url (NOT primary creds, as this is not stored safely). I.E. https://username:password@github.com/user/repo.git" 
+    git.exe clone $RepoURL $BackupRoot
+    
+    ## Merge old folder back into BackupRoot
+    $null = robocopy.exe "$BackupRoot.old" "$BackupRoot" *.* /s /xo /r:0 /np
+    Remove-Item -Recurse -Force "$BackupRoot.old" -ErrorAction SilentlyContinue
+
+    # Build default README.md if it doesn't exist
+    if($(Get-Content "$BackupRoot\README.md" -ErrorAction SilentlyContinue | Measure-Object).count -gt 1){
+        # Readme contains more than one line of content. not rebuilding
+    }else{
+        @"
+## LabTech script history
+
+This repo should contain xml files from all scripts in the labtech system. If the export runs on a schedule, the commit history should provide clean auditing of changes to the scripts over time. Each script is represented by two files
+- <ScriptID>.xml
+    - This file should be directly importable into the control center. Note that this does not contain every reference inside the script (external scripts or files are not included)
+- <ScriptID>.unpacked.xml
+    - This file is the same as above minus the ability to import into LT, but plus the ScriptData and LicenseData fields being expanded into a human-readable format.
+
+
+## Script Links
+
+The scripts are sorted into folders based on their script ID, and [a table of contents should exist in this same directory](.\ToC.md) with mappings between script names and script IDs.
+
+"@ | Out-File "$BackupRoot\README.md"
+    }
+}
+
 #endregion
 
 #region-[Execution]------------------------------------------------------------
+    $scriptStartTime = Get-Date
+
+    
+
     try {
+
+        if($RebuildGitConfig -eq $true){
+            Rebuild-GitConfig
+        }
+
     #Create log
     Log-Start -LogPath $LogPath -LogName $LogName -ScriptVersion $ScriptVersion -Append
    
@@ -783,11 +968,23 @@ Function Export-LTScript {
         }
     
     Log-Write -FullLogPath $FullLogPath -LineValue "Getting list of all scripts."
+    
+    if(Test-Path "$BackupRoot\.git"){
+        "Git config found, doing a pull"
+        Set-Location $BackupRoot
+        $null = git.exe reset --hard
+        $null = git.exe pull --rebase 
+    }
 
+    if($ForceFullExport){
+        # Delete all xml files within the script dirs
+        $null = Get-ChildItem $BackupRoot -Directory | ? name -ge 0 | Get-ChildItem -Include *.xml | Remove-Item -Force
+    }
+    
     $ScriptIDs = @{}
     #Query list of all ScriptID's
     if ($($Config.Settings.LastExport) -eq 0) {
-        if((Get-ChildItem -Recurse -File $BackupRoot | Measure-Object).count -gt 0){
+        if((Get-ChildItem -Directory $BackupRoot | Get-ChildItem -File | Measure-Object).count -gt 0 -and $EmptyFolderOverride -eq $false){
             Log-Write -FullLogPath $FullLogPath -LineValue "No last export implies all scripts should be exported, but the directory is not empty"
         }else{
             $ScriptIDs = Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
@@ -799,7 +996,7 @@ Function Export-LTScript {
     }
     
     Log-Write -FullLogPath $FullLogPath -LineValue "$(@($ScriptIDs).count) scripts to process."
-
+    
     #Process each ScriptID
     $n = 0
     foreach ($ScriptID in $ScriptIDs) {
@@ -811,14 +1008,14 @@ Function Export-LTScript {
         Export-LTScript -ScriptID $($ScriptID.ScriptID)
     }
 
-    if($n -gt -1){
+    if($n -gt 0){
         Update-TableOfContents -FileName "$BackupRoot\ToC.md"
     }
 
     Log-Write -FullLogPath $FullLogPath -LineValue "Export finished."
     
     try {
-        $Config.Settings.LastExport = "$($Date.ToString("yyy-MM-dd HH:mm:ss"))"
+        $Config.Settings.LastExport = "$($scriptStartTime.ToString("yyy-MM-dd HH:mm:ss"))"
         $Config.Save("$PSScriptRoot\LT-ScriptExport-Config.xml")
     }
     Catch {
@@ -827,6 +1024,42 @@ Function Export-LTScript {
             Log-Error -FullLogPath $FullLogPath  -ErrorDesc "Unable to update config with last export date: $FailedItem, $ErrorMessage" -ExitGracefully $True
         }
 
+    ## Commit git changes    
+    if(Test-Path "$BackupRoot\.git"){
+        "Git config found, doing a push"
+
+        <#
+            Init this directory before first run with RebuildGitConfig parameter
+            
+            This will create a .git folder to begin tracking the repo
+        #>
+        
+        Set-Location $BackupRoot
+
+        $scriptDirs = Get-ChildItem $BackupRoot -Directory | ? name -ge 0
+        $changedFiles = @()
+        foreach($scriptDir in $scriptDirs){
+            $changedFiles += Get-ChildItem $scriptDir | ? LastWriteTime -gt $scriptStartTime | select @{n='RelativePath';e={Resolve-Path -Relative $_.FullName}},
+                                @{n='User';e={(Get-Content $_.fullname | select -f 2 | select -l 1 | %{$_.split(":")[1].trim()})}}
+        }
+
+        ## push a commit for each LT user that modified scripts
+        foreach($user in $($changedFiles | Group-Object User).Name){
+            $changedFiles | ? User -eq $user | %{$null = git.exe add "$($_.RelativePath)"}
+            $null = git.exe commit -m "Modified by LT User $user"
+        }
+
+        ## push the rest of the changed files
+        Get-ChildItem -File $BackupRoot | %{
+            $null = git.exe add --all
+            $null = git.exe commit -m "Various files"
+        }
+        git.exe push
+    }else{
+        "Git not found"
+    }
+
     Log-Finish -FullLogPath $FullLogPath -Limit 50000
+
 
 #endregion
