@@ -35,7 +35,8 @@ $scriptFunctionConstantsPSObject = @"
       "28": "Windows 10",
       "29": "Windows 2016 Server",
       "-2147483648": "Function disabled",
-      "-2147483634": "Function disabled"
+      "-2147483634": "Function disabled",
+      "-2147483631": "Function disabled"
    },
    "Actions": {
       "1": "InitialCheck",
