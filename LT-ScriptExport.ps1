@@ -615,14 +615,17 @@ Function Update-TableOfContents {
 
     "## Use this table of contents to jump to details of a script" | Out-File $FileName 
     $ToCData = @()
-    $ToCData += Write-FolderTree -Depth 0 -ParentID 0
-
-    ## output all scripts at base of script tree (technically possible)
+    
+    ## output all scripts at base of script tree above all other folders
     $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=0 ORDER BY ScriptName "
     foreach($FolderScript in $FolderScripts){
         #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).xml) <br>"
         $TOCData += ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).unpacked.xml) - Last Modified By: $($FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))) on $($FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
     }
+    
+    $ToCData += Write-FolderTree -Depth 0 -ParentID 0
+
+    
     $ToCData | Out-File $FileName -Append
 }
 
@@ -1004,8 +1007,6 @@ Function Rebuild-GitConfig {
         $null = Get-ChildItem $BackupRoot -Directory | ? name -ge 0 | Get-ChildItem -File -Include *.xml | ?{$_.name.split(".")[0] -notin $AllScriptIDs.ScriptID} | Remove-Item -Force -ErrorAction SilentlyContinue
     }
 
-    Log-Write -FullLogPath $FullLogPath -LineValue "Export finished."
-    
     try {
         #$Config.Settings.LastExport = "$($scriptStartTime.ToString("yyy-MM-dd HH:mm:ss"))"
         $NewestScriptModification = Get-LTData "SELECT last_date FROM lt_scripts ORDER BY last_date DESC LIMIT 1"
@@ -1082,7 +1083,9 @@ The scripts are sorted into folders based on their script ID, and [a table of co
     }else{
         "Git not found"
     }
-
+    
+    Log-Write -FullLogPath $FullLogPath -LineValue "Export finished."
+    
     Log-Finish -FullLogPath $FullLogPath -Limit 50000
 
 
