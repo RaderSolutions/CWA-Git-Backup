@@ -976,9 +976,9 @@ The scripts are sorted into folders based on their script ID, and [a table of co
     if(Test-Path "$BackupRoot\.git"){
         "Git config found, doing a pull"
         Set-Location $BackupRoot
+        $null = git.exe prune
         $null = git.exe reset --hard
         $null = git.exe pull --rebase 
-        $null = git.exe prune
     }
 
     if($ForceFullExport){
@@ -1061,12 +1061,12 @@ The scripts are sorted into folders based on their script ID, and [a table of co
         if(Test-Path $Config.Settings.LTSharePath){
             # LTShare accessible, include in the git push
             # include files explicitly by extension
-            # exclude any dirs that start with a dot
+            # exclude Uploads dir and any dirs that start with a dot
             "Robocopy beginning. This can take a while for a large LTShare"
             Robocopy.exe /copyall /MIR `
                     "$($Config.Settings.LTSharePath)" "$BackupRoot\LTShare" `
                     *.csv *.txt *.html *.xml *.htm *.log *.rtf *.ini *.sh *.ps1 *.psm1 *.inf *.vbs *.css *.bat *.js *.rdp *.crt *.reg *.cmd *.php `
-                    /XD ".*" `
+                    /XD ".*" "Uploads" `
                     /NC /MT /LOG:"$($env:TEMP)\robocopy.log" 
 
             $null = git.exe add LTShare\.
