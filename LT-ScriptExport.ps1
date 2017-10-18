@@ -1055,7 +1055,7 @@ Function Rebuild-GitConfig {
             # include files explicitly by extension
             # exclude Uploads dir and any dirs that start with a dot
             "Robocopy beginning. This can take a while for a large LTShare"
-            Robocopy.exe /copyall /MIR `
+            Robocopy.exe /MIR `
                     "$($Config.Settings.LTSharePath)" "$BackupRoot\LTShare" `
                     *.csv *.txt *.html *.xml *.htm *.log *.rtf *.ini *.sh *.ps1 *.psm1 *.inf *.vbs *.css *.bat *.js *.rdp *.crt *.reg *.cmd *.php `
                     /XD ".*" "Uploads" `
