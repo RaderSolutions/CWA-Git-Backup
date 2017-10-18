@@ -1037,7 +1037,7 @@ The scripts are sorted into folders based on their script ID, and [a table of co
     ## Commit git changes    
     if(Test-Path "$BackupRoot\.git"){
         "Git config found, doing a push"
-
+        $null = git.exe config --global core.safecrlf false
         <#
             Init this directory before first run with RebuildGitConfig parameter
             
