@@ -1013,10 +1013,19 @@ The scripts are sorted into folders based on their script ID, and [a table of co
         Update-TableOfContents -FileName "$BackupRoot\ToC.md"
     }
 
+    # delete xml files related to scripts that no longer exist
+
+    $AllScriptIDs = Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
+    if($AllScriptIDs.count -gt 100){
+        $null = Get-ChildItem $BackupRoot -Directory | ? name -ge 0 | Get-ChildItem -File -Include *.xml | ?{$_.name.split(".")[0] -notin $AllScriptIDs.ScriptID} | Remove-Item -Force -ErrorAction SilentlyContinue
+    }
+
     Log-Write -FullLogPath $FullLogPath -LineValue "Export finished."
     
     try {
-        $Config.Settings.LastExport = "$($scriptStartTime.ToString("yyy-MM-dd HH:mm:ss"))"
+        #$Config.Settings.LastExport = "$($scriptStartTime.ToString("yyy-MM-dd HH:mm:ss"))"
+        $NewestScriptModification = Get-LTData "SELECT last_date FROM lt_scripts ORDER BY last_date DESC LIMIT 1"
+        $Config.Settings.LastExport = "$($NewestScriptModification.Last_Date.ToString("yyy-MM-dd HH:mm:ss"))"
         $Config.Save("$PSScriptRoot\LT-ScriptExport-Config.xml")
     }
     Catch {
