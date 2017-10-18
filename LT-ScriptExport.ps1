@@ -56,6 +56,7 @@ Param(
 	<MySQLHost></MySQLHost>
 	<CredPath></CredPath>
     <LastExport>0</LastExport>
+    <LTSharePath></LTSharePath>
 </Settings>
 '@
         try {
@@ -66,10 +67,12 @@ Param(
             if ($Config.Settings.BackupRoot -eq '') {$Config.Settings.BackupRoot = "${env:ProgramFiles}\LabTech\Backup\Scripts"}
             $Config.Settings.MySQLDatabase = "$(Read-Host "Name of LabTech database (labtech)")"
             if ($Config.Settings.MySQLDatabase -eq '') {$Config.Settings.MySQLDatabase = "labtech"}
-            $Config.Settings.MySQLHost = "$(Read-Host "FQDN of LabTechServer (localhost)")"
+            $Config.Settings.MySQLHost = "$(Read-Host "FQDN of LabTech DB Server (localhost)")"
             if ($Config.Settings.MySQLHost -eq '') {$Config.Settings.MySQLHost = "localhost"}
             $Config.Settings.CredPath = "$(Read-Host "Path of credentials ($PSScriptRoot)")"
             if ($Config.Settings.CredPath -eq '') {$Config.Settings.CredPath = "$PSScriptRoot"}
+            $Config.Settings.LTSharePath = "$(Read-Host "Path to LTShare from this machine")"
+            if ($Config.Settings.LTSharePath -eq '') {$Config.Settings.LTSharePath = ""}
             $Config.Save("$PSScriptRoot\LT-ScriptExport-Config.xml")
         }
         Catch {
@@ -975,6 +978,7 @@ The scripts are sorted into folders based on their script ID, and [a table of co
         Set-Location $BackupRoot
         $null = git.exe reset --hard
         $null = git.exe pull --rebase 
+        $null = git.exe prune
     }
 
     if($ForceFullExport){
@@ -982,18 +986,18 @@ The scripts are sorted into folders based on their script ID, and [a table of co
         $null = Get-ChildItem $BackupRoot -Directory | ? name -ge 0 | Get-ChildItem -Include *.xml | Remove-Item -Force
     }
     
-    $ScriptIDs = @{}
+    $ScriptIDs = @()
     #Query list of all ScriptID's
     if ($($Config.Settings.LastExport) -eq 0) {
         if((Get-ChildItem -Directory $BackupRoot | Get-ChildItem -File | Measure-Object).count -gt 0 -and $EmptyFolderOverride -eq $false){
             Log-Write -FullLogPath $FullLogPath -LineValue "No last export implies all scripts should be exported, but the directory is not empty"
         }else{
-            $ScriptIDs = Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
+            $ScriptIDs += Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
         }
     }
     else{
         $Query = $("SELECT ScriptID FROM lt_scripts WHERE Last_Date > " + "'" + $($Config.Settings.LastExport) +"' order by ScriptID")
-        $ScriptIDs = Get-LTData $Query   
+        $ScriptIDs += Get-LTData $Query   
     }
     
     Log-Write -FullLogPath $FullLogPath -LineValue "$(@($ScriptIDs).count) scripts to process."
@@ -1038,12 +1042,7 @@ The scripts are sorted into folders based on their script ID, and [a table of co
     if(Test-Path "$BackupRoot\.git"){
         "Git config found, doing a push"
         $null = git.exe config --global core.safecrlf false
-        <#
-            Init this directory before first run with RebuildGitConfig parameter
-            
-            This will create a .git folder to begin tracking the repo
-        #>
-        
+                
         Set-Location $BackupRoot
 
         $scriptDirs = Get-ChildItem $BackupRoot -Directory | ? name -ge 0
@@ -1059,11 +1058,25 @@ The scripts are sorted into folders based on their script ID, and [a table of co
             $null = git.exe commit -m "Modified by LT User $user"
         }
 
-        ## push the rest of the changed files
-        Get-ChildItem -File $BackupRoot | %{
-            $null = git.exe add --all
-            $null = git.exe commit -m "Various files"
+        if(Test-Path $Config.Settings.LTSharePath){
+            # LTShare accessible, include in the git push
+            # include files explicitly by extension
+            # exclude any dirs that start with a dot
+            "Robocopy beginning. This can take a while for a large LTShare"
+            Robocopy.exe /copyall /MIR `
+                    "$($Config.Settings.LTSharePath)" "$BackupRoot\LTShare" `
+                    *.csv *.txt *.html *.xml *.htm *.log *.rtf *.ini *.sh *.ps1 *.psm1 *.inf *.vbs *.css *.bat *.js *.rdp *.crt *.reg *.cmd *.php `
+                    /XD ".*" `
+                    /NC /MT /LOG:"$($env:TEMP)\robocopy.log" 
+
+            $null = git.exe add LTShare\.
+            $null = git.exe commit -m "LTShare changes"  
         }
+
+        ## push the rest of the changed files
+        $null = git.exe add --all
+        $null = git.exe commit -m "Various files"
+        
         git.exe push
     }else{
         "Git not found"
