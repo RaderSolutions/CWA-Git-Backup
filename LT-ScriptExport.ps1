@@ -555,18 +555,27 @@ Function Unpack-LTXML {
 
     [System.Text.Encoding] $enc = [System.Text.Encoding]::UTF8
     $xmlcontent = [xml](Get-Content $FileName)
-    $scriptdata = $xmlcontent.LabTech_Expansion.PackedScript.NewDataSet.Table.ScriptData
-    [byte[]]$scriptdataByteArray = [System.Convert]::FromBase64String($scriptdata)
+
+    $data = $xmlcontent.LabTech_Expansion.PackedScript.NewDataSet.Table.LicenseData
+    [byte[]]$dataByteArray = [System.Convert]::FromBase64String($data)
 
 
-    $decompressedByteArray = Get-DecompressedByteArray -byteArray $scriptdataByteArray
+    $decompressedByteArray = Get-DecompressedByteArray -byteArray $dataByteArray
 
-    $xmlScriptData = [xml]($enc.GetString( $decompressedByteArray ))
+    $xmlData = [xml]($enc.GetString( $decompressedByteArray ))
+
+    $null = $xmlcontent.LabTech_Expansion.PackedScript.NewDataSet.Table.AppendChild($xmlcontent.ImportNode($xmlData.LicenseData,$true))
+
+    $data = $xmlcontent.LabTech_Expansion.PackedScript.NewDataSet.Table.ScriptData
+    [byte[]]$dataByteArray = [System.Convert]::FromBase64String($data)
+
+
+    $decompressedByteArray = Get-DecompressedByteArray -byteArray $dataByteArray
+
+    $xmlData = [xml]($enc.GetString( $decompressedByteArray ))
 
     # Replace actionIDs, functionids, etc with names and descriptions
-    . "$PSScriptRoot\constants.ps1"
-
-    foreach($ScriptStep in $($xmlScriptData.ScriptData.ScriptSteps)){
+    foreach($ScriptStep in $($xmlData.ScriptData.ScriptSteps)){
         $null = $ScriptStep.RemoveChild($ScriptStep.SelectSingleNode('Sort'))
         foreach($type in "action","FunctionID","Continue","OSLimit"){
             $typeDetails = $null
@@ -584,9 +593,7 @@ Function Unpack-LTXML {
         }
     }
 
-    $null = $xmlcontent.LabTech_Expansion.PackedScript.NewDataSet.Table.AppendChild($xmlcontent.ImportNode($xmlScriptData.ScriptData,$true))
-
-
+    $null = $xmlcontent.LabTech_Expansion.PackedScript.NewDataSet.Table.AppendChild($xmlcontent.ImportNode($xmlData.ScriptData,$true))
 
     $xmlcontent.Save($($FileName -replace "\.xml$",".unpacked.xml"))
 }
@@ -615,7 +622,7 @@ Function Update-TableOfContents {
 
     "## Use this table of contents to jump to details of a script" | Out-File $FileName 
     $ToCData = @()
-    
+
     ## output all scripts at base of script tree above all other folders
     $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=0 ORDER BY ScriptName "
     foreach($FolderScript in $FolderScripts){
@@ -966,6 +973,7 @@ Function Rebuild-GitConfig {
 
     if($ForceFullExport){
         # Delete all xml files within the script dirs
+        $null = Remove-Item -Recurse -Force $BackupRoot\LTShare
         $null = Get-ChildItem $BackupRoot -Directory | ? name -ge 0 | Get-ChildItem -Include *.xml | Remove-Item -Force
     }
     
@@ -991,6 +999,9 @@ Function Rebuild-GitConfig {
         #Progress bar
         $n++
         Write-Progress -Activity "Backing up LT scripts to $BackupRoot" -Status "Processing ScriptID $($ScriptID.ScriptID)" -PercentComplete  ($n / @($ScriptIDs).count*100)
+        
+        # Source scriptstep metadata id mappings
+        . "$PSScriptRoot\constants.ps1"
         
         #Export current script
         Export-LTScript -ScriptID $($ScriptID.ScriptID)
