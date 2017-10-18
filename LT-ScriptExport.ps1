@@ -924,26 +924,6 @@ Function Rebuild-GitConfig {
     $null = robocopy.exe "$BackupRoot.old" "$BackupRoot" *.* /s /xo /r:0 /np
     Remove-Item -Recurse -Force "$BackupRoot.old" -ErrorAction SilentlyContinue
 
-    # Build default README.md if it doesn't exist
-    if($(Get-Content "$BackupRoot\README.md" -ErrorAction SilentlyContinue | Measure-Object).count -gt 1){
-        # Readme contains more than one line of content. not rebuilding
-    }else{
-        @"
-## LabTech script history
-
-This repo should contain xml files from all scripts in the labtech system. If the export runs on a schedule, the commit history should provide clean auditing of changes to the scripts over time. Each script is represented by two files
-- <ScriptID>.xml
-    - This file should be directly importable into the control center. Note that this does not contain every reference inside the script (external scripts or files are not included)
-- <ScriptID>.unpacked.xml
-    - This file is the same as above minus the ability to import into LT, but plus the ScriptData and LicenseData fields being expanded into a human-readable format.
-
-
-## Script Links
-
-The scripts are sorted into folders based on their script ID, and [a table of contents should exist in this same directory](.\ToC.md) with mappings between script names and script IDs.
-
-"@ | Out-File "$BackupRoot\README.md"
-    }
 }
 
 #endregion
@@ -1073,6 +1053,27 @@ The scripts are sorted into folders based on their script ID, and [a table of co
             $null = git.exe commit -m "LTShare changes"  
         }
 
+        
+        # Build default README.md if it doesn't exist
+        if($(Get-Content "$BackupRoot\README.md" -ErrorAction SilentlyContinue | Measure-Object).count -gt 1){
+            # Readme contains more than one line of content. not rebuilding
+        }else{
+            @"
+## LabTech script history
+
+This repo should contain xml files from all scripts in the labtech system. If the export runs on a schedule, the commit history should provide clean auditing of changes to the scripts over time. Each script is represented by two files
+- <ScriptID>.xml
+    - This file should be directly importable into the control center. Note that this does not contain every reference inside the script (external scripts or files are not included)
+- <ScriptID>.unpacked.xml
+    - This file is the same as above minus the ability to import into LT, but plus the ScriptData and LicenseData fields being expanded into a human-readable format.
+
+
+## Script Links
+
+The scripts are sorted into folders based on their script ID, and [a table of contents should exist in this same directory](.\ToC.md) with mappings between script names and script IDs.
+
+"@ | Out-File "$BackupRoot\README.md"
+        }
         ## push the rest of the changed files
         $null = git.exe add --all
         $null = git.exe commit -m "Various files"
