@@ -43,8 +43,6 @@ Param(
     
     $ErrorActionPreference = "Stop"
     
-    $Date = Get-Date
-    
     #Get/Save config info
     if($(Test-Path $PSScriptRoot\LT-ScriptExport-Config.xml) -eq $false) {
         #Config file template
