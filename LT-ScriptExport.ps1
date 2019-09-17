@@ -39,7 +39,7 @@ Param(
 )
 #region-[Declarations]----------------------------------------------------------
     
-    $ScriptVersion = "1.1"
+    $ScriptVersion = "2.0"
     
     $ErrorActionPreference = "Stop"
     
@@ -55,22 +55,29 @@ Param(
 	<CredPath></CredPath>
     <LastExport>0</LastExport>
     <LTSharePath></LTSharePath>
+    <LTShareExtensionFilter>*.csv *.txt *.html *.xml *.htm *.log *.rtf *.ini *.sh *.ps1 *.psm1 *.inf *.vbs *.css *.bat *.js *.rdp *.crt *.reg *.cmd *.php</LTShareExtensionFilter>
 </Settings>
 '@
         try {
             #Create config file
-            $Config.Settings.LogPath = "$(Read-Host "Path of log file ($($env:windir)\LTSvc\Logs)")"
-            if ($Config.Settings.LogPath -eq '') {$Config.Settings.LogPath = "$($env:windir)\LTSvc\Logs"}
-            $Config.Settings.BackupRoot = "$(Read-Host "Path of exported scripts (${env:ProgramFiles}\LabTech\Backup\Scripts)")"
-            if ($Config.Settings.BackupRoot -eq '') {$Config.Settings.BackupRoot = "${env:ProgramFiles}\LabTech\Backup\Scripts"}
-            $Config.Settings.MySQLDatabase = "$(Read-Host "Name of LabTech database (labtech)")"
-            if ($Config.Settings.MySQLDatabase -eq '') {$Config.Settings.MySQLDatabase = "labtech"}
-            $Config.Settings.MySQLHost = "$(Read-Host "FQDN of LabTech DB Server (localhost)")"
-            if ($Config.Settings.MySQLHost -eq '') {$Config.Settings.MySQLHost = "localhost"}
-            $Config.Settings.CredPath = "$(Read-Host "Path of credentials ($PSScriptRoot)")"
-            if ($Config.Settings.CredPath -eq '') {$Config.Settings.CredPath = "$PSScriptRoot"}
-            $Config.Settings.LTSharePath = "$(Read-Host "Path to LTShare from this machine")"
-            if ($Config.Settings.LTSharePath -eq '') {$Config.Settings.LTSharePath = ""}
+            $default = "$($env:windir)\LTSvc\Logs"
+            $Config.Settings.LogPath = "$(Read-Host "Path of log file ($default)")"
+            if ($Config.Settings.LogPath -eq '') {$Config.Settings.LogPath = $default}
+            $default = "${env:ProgramFiles}\LabTech\Backup\Scripts"
+            $Config.Settings.BackupRoot = "$(Read-Host "Path of exported scripts ()")"
+            if ($Config.Settings.BackupRoot -eq '') {$Config.Settings.BackupRoot = $default}
+            $default = "labtech"
+            $Config.Settings.MySQLDatabase = "$(Read-Host "Name of LabTech database ($default)")"
+            if ($Config.Settings.MySQLDatabase -eq '') {$Config.Settings.MySQLDatabase = $default}
+            $default = "localhost"
+            $Config.Settings.MySQLHost = "$(Read-Host "FQDN of LabTech DB Server ($default)")"
+            if ($Config.Settings.MySQLHost -eq '') {$Config.Settings.MySQLHost = $default}
+            $default = $PSScriptRoot
+            $Config.Settings.CredPath = "$(Read-Host "Path of credentials ($default)")"
+            if ($Config.Settings.CredPath -eq '') {$Config.Settings.CredPath = $default}
+            $default = "c:\LTShare"
+            $Config.Settings.LTSharePath = "$(Read-Host "Path to LTShare from this machine ($default)")"
+            if ($Config.Settings.LTSharePath -eq '') {$Config.Settings.LTSharePath = $default}
             $Config.Save("$PSScriptRoot\LT-ScriptExport-Config.xml")
         }
         Catch {
@@ -111,8 +118,17 @@ Param(
         $EmptyFolderOverride = $true
     }
 #endregion
- 
+
 #region-[Functions]------------------------------------------------------------
+
+Function New-BackupPath {
+    Param (
+        [Parameter(Mandatory=$true)][string]$NewPath
+    )
+    $BackupPath = [System.IO.Path]::Combine($BackupRoot, $NewPath)
+    $null = mkdir $BackupPath -ErrorAction SilentlyContinue
+    Set-Location $BackupPath
+}
 
 Function Log-Start{
   <#
@@ -425,11 +441,17 @@ Function Get-LTData {
         [Parameter(
         Mandatory = $true,
         ValueFromPipeline = $true)]
-        [string]$Query
+        [string]$Query,
+        [switch]$info_schema
     )
 
     Begin {
-        $ConnectionString = "server=" + $MySQLHost + ";port=3306;uid=" + $MySQLAdminUserName + ";pwd=" + $MySQLAdminPassword + ";database="+$MySQLDatabase
+        $ConnectionString = "server=" + $MySQLHost + ";port=3306;uid=" + $MySQLAdminUserName + ";pwd=" + $MySQLAdminPassword
+        if(-not $info_schema){
+            $ConnectionString +=  ";database="+$MySQLDatabase
+        }else{
+            $ConnectionString +=  ";database=information_schema"
+        }
     }
 
     Process {
@@ -875,7 +897,7 @@ Function Export-LTScript {
 
     # Always write into base directory
         try{
-            $FilePath = "$BackupRoot\$([math]::floor($ScriptXML.ScriptID / 50) * 50)"
+            $FilePath = "$BackupPath\$([math]::floor($ScriptXML.ScriptID / 50) * 50)"
             #Create folder
             New-Item -ItemType Directory -Force -Path $FilePath | Out-Null
         
@@ -925,8 +947,13 @@ Function Rebuild-GitConfig {
     Move-Item "$BackupRoot" "$BackupRoot.old" -Force
     mkdir "$BackupRoot"
 
-    $RepoUrl = Read-Host "Enter the remote URL for git Repo. Include credentials in url (NOT primary creds, as this is not stored safely). I.E. https://username:password@github.com/user/repo.git" 
-    git.exe clone $RepoURL $BackupRoot
+    $RepoUrl = Read-Host "Enter the remote URL for git Repo (ensure ssh keys are setup first). Or type 'local' to initialize a local git repo." 
+    if($RepoURL = 'local'){
+        git.exe init $BackupRoot
+    }else{
+        git.exe clone $RepoURL $BackupRoot
+    }
+    
     
     ## Merge old folder back into BackupRoot
     $null = robocopy.exe "$BackupRoot.old" "$BackupRoot" *.* /s /xo /r:0 /np
@@ -937,165 +964,268 @@ Function Rebuild-GitConfig {
 #endregion
 
 #region-[Execution]------------------------------------------------------------
-    $scriptStartTime = Get-Date
+$scriptStartTime = Get-Date
 
-    
 
-    try {
 
-        if($RebuildGitConfig -eq $true){
-            Rebuild-GitConfig
-        }
+try {
+
+    if($RebuildGitConfig -eq $true){
+        Rebuild-GitConfig
+    }
 
     #Create log
     Log-Start -LogPath $LogPath -LogName $LogName -ScriptVersion $ScriptVersion -Append
-   
+
     #Check backup directory
     if ((Test-Path $BackupRoot) -eq $false){New-Item -ItemType Directory -Force -Path $BackupRoot | Out-Null}
+}
+Catch {
+        $ErrorMessage = $_.Exception.Message
+        $FailedItem = $_.Exception.ItemName
+        Log-Error -FullLogPath $FullLogPath  -ErrorDesc "Error durring log/backup directory creation: $FailedItem, $ErrorMessage" -ExitGracefully $True
     }
-    Catch {
-            $ErrorMessage = $_.Exception.Message
-            $FailedItem = $_.Exception.ItemName
-            Log-Error -FullLogPath $FullLogPath  -ErrorDesc "Error durring log/backup directory creation: $FailedItem, $ErrorMessage" -ExitGracefully $True
-        }
+
+Log-Write -FullLogPath $FullLogPath -LineValue "Getting list of all scripts."
+
+Set-Location $BackupRoot
+if(Test-Path "$BackupRoot\.git"){
+    "Git config found, doing a pull"
+    $null = git.exe prune
+    $null = git.exe reset --hard
+    $null = git.exe pull --rebase 
+}
+
+if($ForceFullExport){
+    # Delete all xml files within the script dirs
+    $null = Remove-Item -Recurse -Force $BackupRoot\LTShare
+    $null = Get-ChildItem $BackupRoot -Directory | ? name -ge 0 | Get-ChildItem -Include *.xml | Remove-Item -Force
+}
+
+###########################
+## CWA Scripts backups
+###########################
+
+New-BackupPath "Scripts"
+
+
+
+$ScriptIDs = @()
+#Query list of all ScriptID's
+if ($($Config.Settings.LastExport) -eq 0) {
+    if((Get-ChildItem -Directory $BackupPath | Get-ChildItem -File | Measure-Object).count -gt 0 -and $EmptyFolderOverride -eq $false){
+        Log-Write -FullLogPath $FullLogPath -LineValue "No last export implies all scripts should be exported, but the directory is not empty"
+    }else{
+        $ScriptIDs += Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
+    }
+}
+else{
+    $Query = $("SELECT ScriptID FROM lt_scripts WHERE Last_Date > " + "'" + $($Config.Settings.LastExport) +"' order by ScriptID")
+    $ScriptIDs += Get-LTData $Query   
+}
+
+Log-Write -FullLogPath $FullLogPath -LineValue "$(@($ScriptIDs).count) scripts to process."
+
+#Process each ScriptID
+$n = 0
+foreach ($ScriptID in $ScriptIDs) {
+    #Progress bar
+    $n++
+    Write-Progress -Activity "Backing up LT scripts to $BackupPath" -Status "Processing ScriptID $($ScriptID.ScriptID)" -PercentComplete  ($n / @($ScriptIDs).count*100)
     
-    Log-Write -FullLogPath $FullLogPath -LineValue "Getting list of all scripts."
-    
-    if(Test-Path "$BackupRoot\.git"){
-        "Git config found, doing a pull"
-        Set-Location $BackupRoot
-        $null = git.exe prune
-        $null = git.exe reset --hard
-        $null = git.exe pull --rebase 
+    # Source scriptstep metadata id mappings
+    . "$PSScriptRoot\constants.ps1"
+
+    #Export current script
+    Export-LTScript -ScriptID $($ScriptID.ScriptID)
+}
+
+if($n -gt 0){
+    Update-TableOfContents -FileName "$BackupPath\ToC.md"
+}
+
+# delete xml files related to scripts that no longer exist
+
+$AllScriptIDs = Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
+if($AllScriptIDs.count -gt 100){
+    $null = Get-ChildItem $BackupPath -Directory | ? name -ge 0 | Get-ChildItem -File -Include *.xml | ?{$_.name.split(".")[0] -notin $AllScriptIDs.ScriptID} | Remove-Item -Force -ErrorAction SilentlyContinue
+}
+
+try {
+    #$Config.Settings.LastExport = "$($scriptStartTime.ToString("yyy-MM-dd HH:mm:ss"))"
+    $NewestScriptModification = Get-LTData "SELECT last_date FROM lt_scripts ORDER BY last_date DESC LIMIT 1"
+    $Config.Settings.LastExport = "$($NewestScriptModification.Last_Date.ToString("yyy-MM-dd HH:mm:ss"))"
+    $Config.Save("$PSScriptRoot\LT-ScriptExport-Config.xml")
+}
+Catch {
+    $ErrorMessage = $_.Exception.Message
+    $FailedItem = $_.Exception.ItemName
+    Log-Error -FullLogPath $FullLogPath  -ErrorDesc "Unable to update config with last export date: $FailedItem, $ErrorMessage" -ExitGracefully $True
+}
+
+
+###########################
+## LTShare backups
+###########################
+
+New-BackupPath "LTShare"
+
+$LTShareSource = $Config.Settings.LTSharePath
+$LTShareExtensionFilter = $Config.Settings.LTShareExtensionFilter
+if(Test-Path $LTShareSource){
+    # LTShare accessible
+    # include files explicitly by extension
+    # exclude Uploads dir and any dirs that start with a dot
+    "Robocopy beginning. This can take a while for a large LTShare"
+    Robocopy.exe /MIR `
+            "$LTShareSource" . `
+            $LTShareExtensionFilter `
+            /XD ".*" "Uploads" `
+            /NC /MT /LOG:"$($env:TEMP)\robocopy.log" 
+}else{
+    "LTShare ($LTShareSource) not accessible"
+}
+
+###########################
+## DB Schema backups
+###########################
+
+New-BackupPath "DB\views"
+
+$SQLQuery = "select table_name from tables where table_type = 'VIEW' and table_schema = '$MySQLDataBase'"
+$rows = Get-LTData $SQLQuery -info_schema
+
+foreach($row in $rows.table_name){
+    $filename = $row
+    $createCol = "Create View"
+    $SQLQuery = "SHOW CREATE VIEW $MySqlDataBase.$row"
+    (Get-LTData $SQLQuery -info_schema).$createCol | Out-File -Force "$row.sql"
+}
+
+New-BackupPath "DB\table_schema"
+
+$SQLQuery = "select table_name from tables where table_type = 'BASE TABLE' and table_schema = '$MySqlDatabase'"
+$rows = Get-LTData $SQLQuery -info_schema
+
+foreach($row in $rows.table_name){
+    $filename = $row
+    $createCol = "Create Table"
+    $SQLQuery = "SHOW CREATE TABLE $MySqlDataBase.$row"
+    ## silent continue due to certain tables failing to export config
+    ## replace the auto_increment field to have sane diffs
+    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$row.sql"
+}
+
+New-BackupPath "DB\procedures"
+
+$SQLQuery = "SHOW PROCEDURE STATUS WHERE db = '$MySqlDatabase'"
+$rows = Get-LTData $SQLQuery -info_schema
+
+foreach($row in $rows.name){
+    $filename = $row
+    $createCol = "Create Procedure"
+    $SQLQuery = "SHOW CREATE PROCEDURE $MySqlDataBase.$row"
+    ## silent continue due to certain tables failing to export config
+    ## replace the auto_increment field to have sane diffs
+    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$row.sql"
+}
+
+
+New-BackupPath "DB\functions"
+
+$SQLQuery = "SHOW FUNCTION STATUS WHERE db = '$MySqlDatabase'"
+$rows = Get-LTData $SQLQuery -info_schema
+
+foreach($row in $rows.name){
+    $filename = $row
+    $createCol = "Create Function"
+    $SQLQuery = "SHOW CREATE FUNCTION $MySqlDataBase.$row"
+    ## silent continue due to certain tables failing to export config
+    ## replace the auto_increment field to have sane diffs
+    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$row.sql"
+}
+
+New-BackupPath "DB\events"
+
+$SQLQuery = "SHOW EVENTS WHERE db = '$MySqlDatabase'"
+$rows = Get-LTData $SQLQuery -info_schema
+
+foreach($row in $rows.name){
+    $filename = $row
+    $createCol = "Create Events"
+    $SQLQuery = "SHOW CREATE EVENTS $MySqlDataBase.$row"
+    ## silent continue due to certain tables failing to export config
+    ## replace the auto_increment field to have sane diffs
+    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$row.sql"
+}
+
+
+
+## Commit git changes    
+if(Test-Path "$BackupRoot\.git"){
+    "Git config found, doing a push"
+    $null = git.exe config --global core.safecrlf false
+            
+## CWA Scripts commits
+    Set-Location $BackupRoot\Scripts
+
+    $scriptDirs = Get-ChildItem -Directory | ? name -ge 0
+    $changedFiles = @()
+    foreach($scriptDir in $scriptDirs){
+        $changedFiles += Get-ChildItem $scriptDir | ? LastWriteTime -gt $scriptStartTime | select @{n='RelativePath';e={Resolve-Path -Relative $_.FullName}},
+                            @{n='User';e={(Get-Content $_.fullname | select -f 2 | select -l 1 | %{$_.split(":")[1].trim()})}}
     }
 
-    if($ForceFullExport){
-        # Delete all xml files within the script dirs
-        $null = Remove-Item -Recurse -Force $BackupRoot\LTShare
-        $null = Get-ChildItem $BackupRoot -Directory | ? name -ge 0 | Get-ChildItem -Include *.xml | Remove-Item -Force
-    }
-    
-    $ScriptIDs = @()
-    #Query list of all ScriptID's
-    if ($($Config.Settings.LastExport) -eq 0) {
-        if((Get-ChildItem -Directory $BackupRoot | Get-ChildItem -File | Measure-Object).count -gt 0 -and $EmptyFolderOverride -eq $false){
-            Log-Write -FullLogPath $FullLogPath -LineValue "No last export implies all scripts should be exported, but the directory is not empty"
-        }else{
-            $ScriptIDs += Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
-        }
-    }
-    else{
-        $Query = $("SELECT ScriptID FROM lt_scripts WHERE Last_Date > " + "'" + $($Config.Settings.LastExport) +"' order by ScriptID")
-        $ScriptIDs += Get-LTData $Query   
-    }
-    
-    Log-Write -FullLogPath $FullLogPath -LineValue "$(@($ScriptIDs).count) scripts to process."
-    
-    #Process each ScriptID
-    $n = 0
-    foreach ($ScriptID in $ScriptIDs) {
-        #Progress bar
-        $n++
-        Write-Progress -Activity "Backing up LT scripts to $BackupRoot" -Status "Processing ScriptID $($ScriptID.ScriptID)" -PercentComplete  ($n / @($ScriptIDs).count*100)
-        
-        # Source scriptstep metadata id mappings
-        . "$PSScriptRoot\constants.ps1"
-
-        #Export current script
-        Export-LTScript -ScriptID $($ScriptID.ScriptID)
+    ## push a commit for each LT user that modified scripts
+    foreach($user in $($changedFiles | Group-Object User).Name){
+        $changedFiles | ? User -eq $user | %{$null = git.exe add "$($_.RelativePath)"}
+        $null = git.exe commit -m "Modified by CWA User $user"
     }
 
-    if($n -gt 0){
-        Update-TableOfContents -FileName "$BackupRoot\ToC.md"
-    }
+### all other folder commits
 
-    # delete xml files related to scripts that no longer exist
 
-    $AllScriptIDs = Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
-    if($AllScriptIDs.count -gt 100){
-        $null = Get-ChildItem $BackupRoot -Directory | ? name -ge 0 | Get-ChildItem -File -Include *.xml | ?{$_.name.split(".")[0] -notin $AllScriptIDs.ScriptID} | Remove-Item -Force -ErrorAction SilentlyContinue
-    }
 
-    try {
-        #$Config.Settings.LastExport = "$($scriptStartTime.ToString("yyy-MM-dd HH:mm:ss"))"
-        $NewestScriptModification = Get-LTData "SELECT last_date FROM lt_scripts ORDER BY last_date DESC LIMIT 1"
-        $Config.Settings.LastExport = "$($NewestScriptModification.Last_Date.ToString("yyy-MM-dd HH:mm:ss"))"
-        $Config.Save("$PSScriptRoot\LT-ScriptExport-Config.xml")
-    }
-    Catch {
-            $ErrorMessage = $_.Exception.Message
-            $FailedItem = $_.Exception.ItemName
-            Log-Error -FullLogPath $FullLogPath  -ErrorDesc "Unable to update config with last export date: $FailedItem, $ErrorMessage" -ExitGracefully $True
-        }
+### finalize git push
 
-    ## Commit git changes    
-    if(Test-Path "$BackupRoot\.git"){
-        "Git config found, doing a push"
-        $null = git.exe config --global core.safecrlf false
-                
-        Set-Location $BackupRoot
+    # Build default README.md if it doesn't exist
+    if($(Get-Content "README.md" -ErrorAction SilentlyContinue | Measure-Object).count -gt 1){
+        # Readme contains more than one line of content. not rebuilding
+    }else{
+        @"
+## CWA System Versioning
 
-        $scriptDirs = Get-ChildItem $BackupRoot -Directory | ? name -ge 0
-        $changedFiles = @()
-        foreach($scriptDir in $scriptDirs){
-            $changedFiles += Get-ChildItem $scriptDir | ? LastWriteTime -gt $scriptStartTime | select @{n='RelativePath';e={Resolve-Path -Relative $_.FullName}},
-                                @{n='User';e={(Get-Content $_.fullname | select -f 2 | select -l 1 | %{$_.split(":")[1].trim()})}}
-        }
-
-        ## push a commit for each LT user that modified scripts
-        foreach($user in $($changedFiles | Group-Object User).Name){
-            $changedFiles | ? User -eq $user | %{$null = git.exe add "$($_.RelativePath)"}
-            $null = git.exe commit -m "Modified by LT User $user"
-        }
-
-        if(Test-Path $Config.Settings.LTSharePath){
-            # LTShare accessible, include in the git push
-            # include files explicitly by extension
-            # exclude Uploads dir and any dirs that start with a dot
-            "Robocopy beginning. This can take a while for a large LTShare"
-            Robocopy.exe /MIR `
-                    "$($Config.Settings.LTSharePath)" "$BackupRoot\LTShare" `
-                    *.csv *.txt *.html *.xml *.htm *.log *.rtf *.ini *.sh *.ps1 *.psm1 *.inf *.vbs *.css *.bat *.js *.rdp *.crt *.reg *.cmd *.php `
-                    /XD ".*" "Uploads" `
-                    /NC /MT /LOG:"$($env:TEMP)\robocopy.log" 
-
-            $null = git.exe add LTShare\.
-            $null = git.exe commit -m "LTShare changes"  
-        }
-
-        
-        # Build default README.md if it doesn't exist
-        if($(Get-Content "$BackupRoot\README.md" -ErrorAction SilentlyContinue | Measure-Object).count -gt 1){
-            # Readme contains more than one line of content. not rebuilding
-        }else{
-            @"
-## LabTech script history
-
-This repo should contain xml files from all scripts in the labtech system. If the export runs on a schedule, the commit history should provide clean auditing of changes to the scripts over time. Each script is represented by two files
+This repo should contain xml files from all scripts in the CWA system. If the export runs on a schedule, the commit history should provide clean auditing of changes to the scripts over time. Each script is represented by two files
 - <ScriptID>.xml
-    - This file should be directly importable into the control center. Note that this does not contain every reference inside the script (external scripts or files are not included)
+- This file should be directly importable into the control center. Note that this does not contain every reference inside the script (external scripts or files are not included)
 - <ScriptID>.unpacked.xml
-    - This file is the same as above minus the ability to import into LT, but plus the ScriptData and LicenseData fields being expanded into a human-readable format.
+- This file is the same as above minus the ability to import into LT, but plus the ScriptData and LicenseData fields being expanded into a human-readable format.
 
 
 ## Script Links
 
 The scripts are sorted into folders based on their script ID, and [a table of contents should exist in this same directory](.\ToC.md) with mappings between script names and script IDs.
 
+## Other various systems 
+
+Various DB properties/schema as well as CWA system definitions (groups, searches, etc) are also backed up here
+
 "@ | Out-File "$BackupRoot\README.md"
-        }
-        ## push the rest of the changed files
-        $null = git.exe add --all
-        $null = git.exe commit -m "Various files"
-        
-        git.exe push
-    }else{
-        "Git not found"
-    }
+    }    
     
-    Log-Write -FullLogPath $FullLogPath -LineValue "Export finished."
+    Set-Location $BackupRoot
+    ## push the rest of the changed files
+    $null = git.exe add --all
+    $null = git.exe commit -m "Various files"
     
-    Log-Finish -FullLogPath $FullLogPath -Limit 50000
+    git.exe push
+}else{
+    "Git not found"
+}
+
+Log-Write -FullLogPath $FullLogPath -LineValue "Export finished."
+
+Log-Finish -FullLogPath $FullLogPath -Limit 50000
 
 
 #endregion

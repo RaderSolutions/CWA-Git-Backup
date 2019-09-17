@@ -24,23 +24,25 @@ This powershell script (referred to as 'the backup script' from here on) will ba
 The MySQL .NET connector is required.
 https://dev.mysql.com/downloads/connector/net/6.9.html
 
-If you want to utilize the git pushing feature, you need a git client
- - The recommended git client can be installed via [chocolatey](https://chocolatey.org/docs/installation)
-  - Once chocolatey is installed: `chocolatey install -y git.install`
- - Once git is installed, [ssh keys should be configured for simplicity](http://guides.beanstalkapp.com/version-control/git-on-windows.html#installing-ssh-keys)
 
 This script can be run against any machine, but ideally one would use the CWA script wrapper and set up a schedule to run against one of the LabTech backend servers directly: DB, App, Web
 
 # Basic script features
 The script must be run manually once to provide config parameters (db server, backup directory, etc). 
-- The credentials are stored as a powershell credential object and can only be read in by the same account that created it. 
-  - If you will be utilizing the LabTech script to schedule the backups, you will want to run the initial script execution as the service account for the labtech agent (likely the SYSTEM account). 
+- The credentials are stored as a powershell credential object and can only be read in by the same account that created it
+  - if it's going to be run by CWA script, this is likely the SYSTEM account (or whichever account the service runs as)
 - This can be done either by logging in as the user or (as in the case of the SYSTEM account) by using [psexec](https://docs.microsoft.com/en-us/sysinternals/downloads/psexec)
-The script also contains functionality to push the backup directory to a git repo. 
-- The requirement is that the local git client is setup such that one can browse to the backup directory and successfully run
+
+The script also contains functionality to push the backup directory to an external git repo. 
+ - The requirement is that the local git client is setup such that one can browse to the backup directory and successfully run
   - `git.exe pull`
   - `git.exe push`
   - `git.exe remote -v`
+If you want to utilize the git pushing feature, you need a git client
+ - The recommended git client can be installed via [chocolatey](https://chocolatey.org/docs/installation)
+  - Once chocolatey is installed: `chocolatey install -y git.install`
+ - Once git is installed, [ssh keys should be configured for simplicity](http://guides.beanstalkapp.com/version-control/git-on-windows.html#installing-ssh-keys)
+
 - There is a crude parameter to set this up using basic credentials in the https git URL: `-RebuildGitConfig`
 
 # CWA Script wrapper
