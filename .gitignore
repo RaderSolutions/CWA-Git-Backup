@@ -1,3 +1,7 @@
 # Stop config files being commited
-\*-Config.xml
+*-Config.xml
+LT-ScriptExport-Config.xml
+
+# Exclude backups from editor
+*.bak
 
