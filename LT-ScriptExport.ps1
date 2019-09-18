@@ -128,6 +128,7 @@ Function New-BackupPath {
     $BackupPath = [System.IO.Path]::Combine($BackupRoot, $NewPath)
     $null = mkdir $BackupPath -ErrorAction SilentlyContinue
     Set-Location $BackupPath
+    return $BackupPath
 }
 
 Function Log-Start{
@@ -1006,7 +1007,7 @@ if($ForceFullExport){
 ## CWA Scripts backups
 ###########################
 
-New-BackupPath "Scripts"
+$BackupPath = New-BackupPath "Scripts"
 
 
 
@@ -1068,7 +1069,7 @@ Catch {
 ## LTShare backups
 ###########################
 
-New-BackupPath "LTShare"
+$BackupPath = New-BackupPath "LTShare"
 
 $LTShareSource = $Config.Settings.LTSharePath
 $LTShareExtensionFilter = $Config.Settings.LTShareExtensionFilter
@@ -1078,7 +1079,7 @@ if(Test-Path $LTShareSource){
     # exclude Uploads dir and any dirs that start with a dot
     "Robocopy beginning. This can take a while for a large LTShare"
     Robocopy.exe /MIR `
-            "$LTShareSource" . `
+            "$LTShareSource" "$BackupPath" `
             $LTShareExtensionFilter `
             /XD ".*" "Uploads" `
             /NC /MT /LOG:"$($env:TEMP)\robocopy.log" 
@@ -1090,73 +1091,73 @@ if(Test-Path $LTShareSource){
 ## DB Schema backups
 ###########################
 
-New-BackupPath "DB\views"
+$BackupPath = New-BackupPath "DB\views"
 
 $SQLQuery = "select table_name from tables where table_type = 'VIEW' and table_schema = '$MySQLDataBase'"
 $rows = Get-LTData $SQLQuery -info_schema
 
 foreach($row in $rows.table_name){
-    $filename = $row
+    $filename = [System.IO.Path]::Combine($BackupPath, $row)
     $createCol = "Create View"
     $SQLQuery = "SHOW CREATE VIEW $MySqlDataBase.$row"
-    (Get-LTData $SQLQuery -info_schema).$createCol | Out-File -Force "$row.sql"
+    (Get-LTData $SQLQuery -info_schema).$createCol | Out-File -Force "$filename.sql"
 }
 
-New-BackupPath "DB\table_schema"
+$BackupPath = New-BackupPath "DB\table_schema"
 
 $SQLQuery = "select table_name from tables where table_type = 'BASE TABLE' and table_schema = '$MySqlDatabase'"
 $rows = Get-LTData $SQLQuery -info_schema
 
 foreach($row in $rows.table_name){
-    $filename = $row
+    $filename = [System.IO.Path]::Combine($BackupPath, $row)
     $createCol = "Create Table"
     $SQLQuery = "SHOW CREATE TABLE $MySqlDataBase.$row"
     ## silent continue due to certain tables failing to export config
     ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$row.sql"
+    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$filename.sql"
 }
 
-New-BackupPath "DB\procedures"
+$BackupPath = New-BackupPath "DB\procedures"
 
 $SQLQuery = "SHOW PROCEDURE STATUS WHERE db = '$MySqlDatabase'"
 $rows = Get-LTData $SQLQuery -info_schema
 
 foreach($row in $rows.name){
-    $filename = $row
+    $filename = [System.IO.Path]::Combine($BackupPath, $row)
     $createCol = "Create Procedure"
     $SQLQuery = "SHOW CREATE PROCEDURE $MySqlDataBase.$row"
     ## silent continue due to certain tables failing to export config
     ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$row.sql"
+    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$filename.sql"
 }
 
 
-New-BackupPath "DB\functions"
+$BackupPath = New-BackupPath "DB\functions"
 
 $SQLQuery = "SHOW FUNCTION STATUS WHERE db = '$MySqlDatabase'"
 $rows = Get-LTData $SQLQuery -info_schema
 
 foreach($row in $rows.name){
-    $filename = $row
+    $filename = [System.IO.Path]::Combine($BackupPath, $row)
     $createCol = "Create Function"
     $SQLQuery = "SHOW CREATE FUNCTION $MySqlDataBase.$row"
     ## silent continue due to certain tables failing to export config
     ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$row.sql"
+    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$filename.sql"
 }
 
-New-BackupPath "DB\events"
+$BackupPath = New-BackupPath "DB\events"
 
 $SQLQuery = "SHOW EVENTS WHERE db = '$MySqlDatabase'"
 $rows = Get-LTData $SQLQuery -info_schema
 
 foreach($row in $rows.name){
-    $filename = $row
+    $filename = [System.IO.Path]::Combine($BackupPath, $row)
     $createCol = "Create Events"
     $SQLQuery = "SHOW CREATE EVENTS $MySqlDataBase.$row"
     ## silent continue due to certain tables failing to export config
     ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$row.sql"
+    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$filename.sql"
 }
 
 
