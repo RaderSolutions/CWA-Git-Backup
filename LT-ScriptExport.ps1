@@ -1151,15 +1151,15 @@ foreach($row in $rows.name){
 $BackupPath = New-BackupPath "DB\events"
 
 $SQLQuery = "SHOW EVENTS WHERE db = '$MySqlDatabase'"
-$rows = Get-LTData $SQLQuery -info_schema
+$rows = Get-LTData $SQLQuery 
 
 foreach($row in $rows.name){
     $filename = [System.IO.Path]::Combine($BackupPath, $row)
-    $createCol = "Create Events"
-    $SQLQuery = "SHOW CREATE EVENTS $MySqlDataBase.$row"
+    $createCol = "Create Event"
+    $SQLQuery = "SHOW CREATE EVENT $MySqlDataBase.$row"
     ## silent continue due to certain tables failing to export config
     ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$filename.sql"
+    (Get-LTData $SQLQuery -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$filename.sql"
 }
 
 
