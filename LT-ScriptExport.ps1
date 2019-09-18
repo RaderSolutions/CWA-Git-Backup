@@ -1082,7 +1082,9 @@ if(Test-Path $LTShareSource){
             "$LTShareSource" "$BackupPath" `
             $LTShareExtensionFilter `
             /XD ".*" "Uploads" `
-            /NC /MT /LOG:"$($env:TEMP)\robocopy.log" 
+            /NC /MT /LOG:"$($env:TEMP)\robocopy.log" `
+            /R:3 /W:5 /NP /xa:H 
+                                
 }else{
     "LTShare ($LTShareSource) not accessible"
 }
