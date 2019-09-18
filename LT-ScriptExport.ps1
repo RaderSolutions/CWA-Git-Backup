@@ -1221,7 +1221,7 @@ Various DB properties/schema as well as CWA system definitions (groups, searches
     
     git.exe push
 }else{
-    "Git not found"
+    "[$BackupRoot] is not a git repo - skipping all git actions"
 }
 
 Log-Write -FullLogPath $FullLogPath -LineValue "Export finished."
