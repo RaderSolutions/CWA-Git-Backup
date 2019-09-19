@@ -81,7 +81,9 @@ Param(
             $default = $PSScriptRoot
             $Config.Settings.CredPath = "$(Read-Host "Path of credentials [$default]")"
             if ($Config.Settings.CredPath -eq '') {$Config.Settings.CredPath = $default}
-            $default = "c:\LTShare"
+            # Pull LTShare location from registry if possible, else default to default setting.
+            $default = (get-itemproperty -path "HKLM:\SOFTWARE\Wow6432Node\LabTech\Setup" -name "Local LTShare" -ErrorAction SilentlyContinue)."Local LTShare"
+            If ($default -eq $null) {$default = "c:\LTShare"}
             $Config.Settings.LTSharePath = "$(Read-Host "Path to LTShare from this machine [$default]")"
             if ($Config.Settings.LTSharePath -eq '') {$Config.Settings.LTSharePath = $default}
             $Config.Save($ConfigFile)
