@@ -33,7 +33,7 @@
 #Requires -Version 3.0 
  
 Param(
-    [bool]$EmptyFolderOverride = $false,
+    [switch]$EmptyFolderOverride,
     [switch]$ForceFullExport,
     [switch]$RebuildGitConfig,
     [switch]$Verbose
@@ -155,6 +155,35 @@ Function New-BackupPath {
     $null = New-Item -ItemType Directory -Force -Path $BackupPath
     Set-Location $BackupPath
     Return $BackupPath
+}
+
+Function Backup-DBSchema {
+    Param(
+        [switch]$info_schema,
+        [Parameter(Mandatory=$true,Position=1)][string]$BackupPath,
+        [Parameter(Mandatory=$true,Position=2)][string]$nameCol,
+        [Parameter(Mandatory=$true,Position=3)][string]$createCol,
+        [Parameter(Mandatory=$true,Position=4)][string]$createSQLQueryPrefix,
+        [Parameter(Mandatory=$true,Position=5)][string]$listSQLQuery
+    )
+    if($info_schema){
+        $rows = Get-LTData $listSQLQuery -info_schema
+    }else{
+        $rows = Get-LTData $listSQLQuery
+    }
+
+    foreach($row in $rows.$nameCol){
+        $filename = [System.IO.Path]::Combine($BackupPath, "$row.sql")        
+        $SQLQuery = "$createSQLQueryPrefix $MySqlDataBase.$row"
+        ## silent continue due to certain tables failing to export config
+        ## replace the auto_increment field to have sane diffs
+        if($info_schema){
+            (Get-LTData $SQLQuery -info_schema -ErrorAction Continue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
+        }else{
+            (Get-LTData $SQLQuery -ErrorAction Continue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
+        }
+    }
+    get-ChildItem $BackupPath -File | ? {($_.name -replace '\.sql','') -notin $rows.$nameCol} | remove-item -Force
 }
 
 function Format-Xml {
@@ -1188,9 +1217,9 @@ try{
 }
 
 ## fix any scripts with empty last_user, as the table of contents function doesn't like that
-$tempScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE NOT (LENGTH(last_user) > 0)"
+$tempScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE last_user not like '%@%'"
 if($tempScripts.count -gt 0){
-    $null = Get-LTData -query "UPDATE lt_scripts SET last_user = 'None' WHERE NOT (LENGTH(last_user) > 0)"
+    $null = Get-LTData -query "UPDATE lt_scripts SET last_user = 'None@localhost' WHERE last_user not like '%@%'"
 }
 
 $NewestScriptModification = Get-LTData "SELECT last_date FROM lt_scripts ORDER BY last_date DESC LIMIT 1"
@@ -1259,13 +1288,12 @@ if(Test-Path $LTShareSource){
     # LTShare accessible
     # include files explicitly by extension
     # exclude Uploads dir and any dirs that start with a dot
-    "Robocopy beginning. This can take a while for a large LTShare"
-    Robocopy.exe /MIR `
-            "$LTShareSource" "$BackupPath" `
-            $LTShareExtensionFilter `
-            /XD ".*" "Uploads" `
-            /NC /MT /LOG:"$($env:TEMP)\robocopy.log" `
-            /R:3 /W:5 /NP /xa:H 
+    if($Verbose){"Robocopy beginning. This can take a while for a large LTShare"}
+    ## for some reason the abstraction of Extension Filters into a variable makes it not function. Resolving the variables into a flat string before invoke-expression seems to fix it
+    $cmd = @"
+Robocopy.exe /MIR "$LTShareSource" "$BackupPath" $LTShareExtensionFilter /XD ".*" "Uploads" /NC /MT /LOG:"$($env:TEMP)\robocopy.log" /R:3 /W:5 /NP /xa:H 
+"@		
+    invoke-expression $cmd
 }else{
     "LTShare ($LTShareSource) not accessible"
 }
@@ -1274,87 +1302,25 @@ if(Test-Path $LTShareSource){
 ## DB Schema backups
 ###########################
 $TopLevel = "DB-Schema"
+
 $BackupPath = New-BackupPath "$TopLevel\views"
-
-$SQLQuery = "select table_name from tables where table_type = 'VIEW' and table_schema = '$MySQLDataBase'"
-$rows = Get-LTData $SQLQuery -info_schema
-$nameCol = 'table_name'
-
-foreach($row in $rows.$nameCol){
-    $filename = [System.IO.Path]::Combine($BackupPath, "$row.sql")
-    $createCol = "Create View"
-    $SQLQuery = "SHOW CREATE VIEW $MySqlDataBase.$row"
-    (Get-LTData $SQLQuery -info_schema).$createCol | Out-File -Force $filename
-}
-get-ChildItem -File | ? {($_.name -replace '\.sql','') -notin $rows.$nameCol} | remove-item -Force
+Backup-DBSchema -info_schema $BackupPath "table_name" "Create View" "SHOW CREATE VIEW" "select table_name from tables where table_type = 'VIEW' and table_schema = '$MySQLDataBase'"
 
 ####
 $BackupPath = New-BackupPath "$TopLevel\table_schema"
-
-$SQLQuery = "select table_name from tables where table_type = 'BASE TABLE' and table_schema = '$MySqlDatabase'"
-$rows = Get-LTData $SQLQuery -info_schema
-$nameCol = 'table_name'
-
-foreach($row in $rows.$nameCol){
-    $filename = [System.IO.Path]::Combine($BackupPath, "$row.sql")
-    $createCol = "Create Table"
-    $SQLQuery = "SHOW CREATE TABLE $MySqlDataBase.$row"
-    ## silent continue due to certain tables failing to export config
-    ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
-}
-get-ChildItem -File | ? {($_.name -replace '\.sql','') -notin $rows.$nameCol} | remove-item -Force
+Backup-DBSchema -info_schema $BackupPath "table_name" "Create Table" "SHOW CREATE TABLE" "select table_name from tables where table_type = 'BASE TABLE' and table_schema = '$MySqlDatabase'"
 
 ####
 $BackupPath = New-BackupPath "$TopLevel\procedures"
-
-$SQLQuery = "SHOW PROCEDURE STATUS WHERE db = '$MySqlDatabase'"
-$rows = Get-LTData $SQLQuery -info_schema
-$nameCol = 'name'
-
-foreach($row in $rows.$nameCol){
-    $filename = [System.IO.Path]::Combine($BackupPath, "$row.sql")
-    $createCol = "Create Procedure"
-    $SQLQuery = "SHOW CREATE PROCEDURE $MySqlDataBase.$row"
-    ## silent continue due to certain tables failing to export config
-    ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
-}
-get-ChildItem -File | ? {($_.name -replace '\.sql','') -notin $rows.$nameCol} | remove-item -Force
+Backup-DBSchema -info_schema $BackupPath "name" "Create Procedure" "SHOW CREATE PROCEDURE" "SHOW PROCEDURE STATUS WHERE db = '$MySqlDatabase'"
 
 ####
 $BackupPath = New-BackupPath "$TopLevel\functions"
-
-$SQLQuery = "SHOW FUNCTION STATUS WHERE db = '$MySqlDatabase'"
-$rows = Get-LTData $SQLQuery -info_schema
-$nameCol = 'name'
-
-foreach($row in $rows.$nameCol){
-    $filename = [System.IO.Path]::Combine($BackupPath, "$row.sql")
-    $createCol = "Create Function"
-    $SQLQuery = "SHOW CREATE FUNCTION $MySqlDataBase.$row"
-    ## silent continue due to certain tables failing to export config
-    ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
-}
-get-ChildItem -File | ? {($_.name -replace '\.sql','') -notin $rows.$nameCol} | remove-item -Force
+Backup-DBSchema -info_schema $BackupPath "name" "Create function" "SHOW CREATE FUNCTION" "SHOW FUNCTION STATUS WHERE db = '$MySqlDatabase'"
 
 ####
 $BackupPath = New-BackupPath "$TopLevel\events"
-
-$SQLQuery = "SHOW EVENTS WHERE db = '$MySqlDatabase'"
-$rows = Get-LTData $SQLQuery -info_schema
-$nameCol = 'name'
-
-foreach($row in $rows.$nameCol){
-    $filename = [System.IO.Path]::Combine($BackupPath, "$row.sql")
-    $createCol = "Create Event"
-    $SQLQuery = "SHOW CREATE EVENT $MySqlDataBase.$row"
-    ## silent continue due to certain tables failing to export config
-    ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
-}
-get-ChildItem -File | ? {($_.name -replace '\.sql','') -notin $rows.$nameCol} | remove-item -Force
+Backup-DBSchema $BackupPath "name" "Create Event" "Show create event" "Show Events"
 
 ####
 ###########################
@@ -1397,25 +1363,42 @@ if(Test-Path "$BackupRoot\.git"){
     }
 
 ### push a commit for each LT user that modified scripts
-    foreach($user in $($changedFiles | Group-Object User).Name){
-        if($Verbose){"Committing script changes"}
-        $changedFiles | ? User -eq $user | %{$null = git.exe add "$($_.RelativePath)"}
-        $null = git.exe commit -m "Modified by CWA User $user"
+    if($ForceFullExport){
+        ## not doing individual commits on initial backup
+        git.exe add .\
+        $commitString = "CW Scripts initial commit"
+        if($Verbose){$commitString}
+        $null = git.exe commit -m "$commitString"
+    }else{
+        foreach($user in $($changedFiles | Group-Object User).Name){
+            if($Verbose){"Committing script changes"}
+            $changedFiles | ? User -eq $user | %{$null = git.exe add "$($_.RelativePath)"}
+            $null = git.exe commit -m "Modified by CWA User $user"
+        }
     }
 
 ### push a commit for each file extention in LTShare
     Set-Location $BackupRoot\LTShare
     $FoldersCommitted += "LTShare"
 
-    $files = Get-ChildItem -Recurse -File 
-    $extensions = ($files | group-object Extension).Name
-    Set-Location $BackupRoot
-    foreach($ext in $extensions){
-        $null = $files | ? Extension -eq $ext | %{$null = git.exe add "$(resolve-path -relative $_.fullname)"}
-        $commitString = "Changes from LTShare with extension $ext"
+    if($ForceFullExport){
+        ## not doing individual commits on initial backup
+        git.exe add .\
+        $commitString = "LTShare initial commit"
         if($Verbose){$commitString}
         $null = git.exe commit -m "$commitString"
+    }else{
+        $files = Get-ChildItem -Recurse -File 
+        $extensions = ($files | group-object Extension).Name
+        Set-Location $BackupRoot
+        foreach($ext in $extensions){
+            $null = $files | ? Extension -eq $ext | %{$null = git.exe add "$(resolve-path -relative $_.fullname)"}
+            $commitString = "Changes from LTShare with extension $ext"
+            if($Verbose){$commitString}
+            $null = git.exe commit -m "$commitString"
+        }
     }
+    
 
 ### all other folder commits
 
