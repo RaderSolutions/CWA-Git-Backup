@@ -153,7 +153,7 @@ Function New-BackupPath {
         [Parameter(Mandatory=$true)][string]$NewPath
     )
     $BackupPath = [System.IO.Path]::Combine($BackupRoot, $NewPath)
-    $null = New-Item -ItemType Directory -Force -Path $BackupPath
+    New-Item -ItemType Directory -Force -Path $BackupPath | Out-Null
     Set-Location $BackupPath
     Return $BackupPath
 }
@@ -276,12 +276,12 @@ Function Log-Start{
 
     #Check if folder exists if not create    
     If((Test-Path -PathType Container -Path $LogPath) -eq $False){
-      New-Item -ItemType Directory -Force -Path $LogPath
+      New-Item -ItemType Directory -Force -Path $LogPath | Out-Null
     }
 
     #Create file and start logging
     If($(Test-Path -Path $FullLogPath) -ne $true) {
-        New-Item -Path $LogPath -Name $LogName -ItemType File
+        New-Item -Path $LogPath -Name $LogName -ItemType File | Out-Null
     }
 
     Add-Content -Path $FullLogPath -Value "***************************************************************************************************"
@@ -1095,7 +1095,7 @@ Function Export-Search {
     try{
         $FilePath = "$BackupPath\$([math]::floor($Search.SensID / 50) * 50)"
         #Create folder
-        $null = New-Item -ItemType Directory -Force -Path $FilePath
+        New-Item -ItemType Directory -Force -Path $FilePath | Out-Null
 
         #Save XML
         $FileName = "$FilePath\$($Search.SensId).xml"
