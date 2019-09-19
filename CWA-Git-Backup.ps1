@@ -1381,7 +1381,8 @@ if(Test-Path "$BackupRoot\.git"){
         if($Verbose){"committing $commitString"}
         $null = git.exe commit -m "$commitString"
     }else{
-        foreach($user in $($changedFiles | Group-Object User).Name){            
+        foreach($user in $($changedFiles | Group-Object User).Name){     
+            $null = git add ./ToC.md       
             $changedFiles | ? User -eq $user | %{$null = git.exe add "$($_.RelativePath)"}
             $commitString =  "CWA Script(s) Modified by User $user"
             if($Verbose){"committing $commitString"}
