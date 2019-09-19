@@ -134,7 +134,7 @@ Param(
     #Robocopy Log File Info
     $LogNameRobo = "CWA-Export-robocopy.log"
     $LogPath = ($Config.Settings.LogPath)
-    $FullLogPathRobo = [System.IO.Path]::Combine($LogPath, $LogName)
+    $FullLogPathRobo = [System.IO.Path]::Combine($LogPath, $LogNameRobo)
 
     #Location to the backp repository
     $BackupRoot = $Config.Settings.BackupRoot
