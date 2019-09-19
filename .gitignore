@@ -1,0 +1,5 @@
+# Stop config files being commited
+*-Config.xml
+
+# Stop editor backup files being commited
+*.bak

@@ -1,5 +1,5 @@
 ﻿<LabTech_Expansion
-	Version="110.418"
+	Version="190.203"
 	Name="LabTech Script Expansion"
 	Type="PackedScript">
 	<PackedScript>
@@ -7,18 +7,18 @@
 			<Table>
 				<ScriptId>7504</ScriptId>
 				<FolderId>0</FolderId>
-				<ScriptName>LT-Script Backup</ScriptName>
-				<ScriptNotes>This script will export a copy of all LT scripts as an xml file. All scripts will have the last modified data and last user to modify appended to the file contents.
+				<ScriptName>CWA-Git-Backup</ScriptName>
+				<ScriptNotes>This script will export a copy of various CWA systems.
 
-The structure of the backup directory and functionality of the powershell script is detailed in the GitHub README: https://github.com/RaderSolutions/LabTech--Script-Backup/blob/master/README.md</ScriptNotes>
-				<Permission>0,</Permission>
-				<EditPermission>0,</EditPermission>
+The structure of the backup directory and functionality of the powershell script is detailed in the GitHub README: https://github.com/RaderSolutions/CWA-Git-Backup/blob/master/README.md</ScriptNotes>
+				<Permission>5,502,504,505,506,</Permission>
+				<EditPermission>5,504,505,506,516,</EditPermission>
 				<ComputerScript>1</ComputerScript>
 				<LocationScript>0</LocationScript>
 				<MaintenanceScript>0</MaintenanceScript>
 				<FunctionScript>0</FunctionScript>
 				<LicenseData>H4sIAAAAAAAEAFWPwQrCMBBE74L/kA9oSNKqrWXJRcWLgljxnjQr5GAa0gTs32uLQj0Mw87wFgZOtkXX415FJeE2eJQC2ORwTW7XJRcxSA5sdsHh5W0YGZRNckYNGWnQR3xqDCTn2UdiTapa8HpVkcsZ2IyApg3WxzuG3nZufP0ffPtjskbiBnNj2i3VxVpTIbCkqio45VwYU+lSPFT54ycA2HzQcvEGkW0tL+AAAAA=</LicenseData>
-				<ScriptData>H4sIAAAAAAAEAOVaUU/jOBB+X2n/g4XUl5PS1mlLKEIVCxSE1GPRUp10Ei9OPG1969pR7Bz035+TGLaUNktzDkvu+tJMHCfO52/G841zchclLNYXRJPR508InRS2yg1jjh91QrLWSwacKtR5arglCVmChkSNpiz6Dvo8AaKZFOdEw1wmq5PO2iW20xWXIeFrdyme9oe5xPQc4ZPOyxMvrrpKGR3BIfiURkMv7A1CD2MIPHLU63rdLqb0KAzwjARPd8k75C/VWX8re7s7DfHzwL5E2g7AHtnzl6nI7Wuata1Z6yjgDVT8Dbu3Yfc37MEaHjLRo64Zb/Zvz51LoZlIITv/fGzbvqoJW7K8y9OhbbkWFITOZyRrXTfXIfmBQgksfgks/nA3LqPiliiEOROCibnlBP4fw9UtgQtvx2fU4lr9HVGWtO4tke8nJJxCtLA2OiPR9zS23f2XcI5CouCW6IVt7u2FLnaNbr9GdPGgXwLv6RMQp7Xw0G8UUr0yv70AbuI2ImKF5AzpBShAM8ZBIS1RAh6VD4JLQtEskUs0Z3qRhrVg2nONqf/RfPsHKe8jKZQmQqt2rPAOXzYtl2YiKrly3zWYh3USFJe6ssVhhydn494KH64E3KBRwJU59kLrWB13Ogl5aBdumypIDPG0GUw7ksvO5AzmgqS0Y1cYzyuG4RVLTGdJlMnoOtu4+oraG5O0ORndSpNx6Hoygg8cEiZTC//4MTYvXVNgCBrF7w8UGI4aBdy7BIbdjH2f8DBsUngo5/Ja2q/K0v7NKOGZF52xeftxyff0guPxI0SprhZFsHMhhn+Vbp3IOWLC5LqtiDPzfEGW0LpvcRnlI7Gm8YrYgJXkJiIK3f15Nx3/btJmipJUoIO36rZtYf4gS7WjrKYCKMrnM03yh+eJeBt9jTODcL7Kn/VgfBYdeN8gTBmnV0wXHED2PvYGkOXyKMwfisy4INIyWWVXMBHxlAIyPVGcKpPx15LPY+dystaEHg/ereiDncvHOr2nXD5uhBHHFHKuCeus9+DDEpxi+QCJ8TXO2/AIyIMcNnNlLDmLVihcxUQp5GUe/2+jST1z4VxS1lnzqFZ7y+cnAZVy3dqxbH7LW6stms61Za0Ilnl9gcIxOi0O6imyYefyr068gjLGvWDNJu2OdlCtcGmTAwhmiEnb20k3OrZ7Mkalm1BC81ezl/bL8XWuBXsfzaMvv1xPxhc78FVmmKmq5srO1eCvKwCX8MexPzvXa7Wu5mUB0HFC6P/397UmU+ShF7kLWhgZVeqga5vNcJeGfxkJU8lb/UZtbFWCd7oAo/gyREMAYWQpgiSRCYJ8DWFijmxZodjGsclk+/OnjRW8bArOJF1Vw79R22Wu6M0UUppxnnP8+ubqzWDL5dK8WTWknQumJiCd0T4r0GQbmRSpNIpAqVma1UtKkb7MM6vqtG6UIirNT0+3f9ezq7J+uF8Z93kuy/NRv1n6qAp5cb/380DLXn1YtScvneumwS9LTn/LfuhGovMFEXNQ6Ay4fEB6YaIrZwLQLQei6qk++RX0URYTmiSQWkVawOiuekcxluuLakxslEyq5tE/Wctfi6o9IXQummpVmkEZhGEQ+UG/53WHQZB9z+l7Q9IfetjvmSCAqU8zhViDI/ecy6s6/Xh/tT6+uagHN+e66Q2y9Mm2nyn/A1oj1821LAAA</ScriptData>
+				<ScriptData>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</ScriptData>
 				<ScriptVersion>1</ScriptVersion>
 				<ScriptGuid>e6e2ddc9-b35b-11e7-a830-001dd8b71fa7</ScriptGuid>
 				<ScriptFlags>0</ScriptFlags>
@@ -36,7 +36,7 @@ The structure of the backup directory and functionality of the powershell script
 @TicketCreateBody@ - Ticket Body /Comment Text
 @TicketComment@ - Ticket Comment for an Existing Ticket</ScriptNotes>
 					<Permission>5,502,504,505,506,</Permission>
-					<EditPermission>5,506,</EditPermission>
+					<EditPermission>5,504,505,506,516,</EditPermission>
 					<ComputerScript>1</ComputerScript>
 					<LocationScript>0</LocationScript>
 					<MaintenanceScript>0</MaintenanceScript>
@@ -57,7 +57,7 @@ The structure of the backup directory and functionality of the powershell script
 						<ScriptName>Load Properties - Ticketing*</ScriptName>
 						<ScriptNotes>Wraps the Load Properties function, sets the LoadPropertyClass = 2 for Ticket Properties and calls the main function</ScriptNotes>
 						<Permission>5,502,504,505,506,</Permission>
-						<EditPermission>5,506,</EditPermission>
+						<EditPermission>5,504,505,506,516,</EditPermission>
 						<ComputerScript>1</ComputerScript>
 						<LocationScript>0</LocationScript>
 						<MaintenanceScript>0</MaintenanceScript>
@@ -99,7 +99,7 @@ The structure of the backup directory and functionality of the powershell script
 						<ScriptName>Ticket Max Consolidation*</ScriptName>
 						<ScriptNotes>Called by 'Ticket Consolidation' Autofix script.  This script checks @monitorticketid@ to see if it has more ticket comments then the maximum number of comments defined in @propTicketMaxConsolidationComments@.  Both of these values must be defined before calling this script.  The script returns @TicketMaxComments@ 0 for no, 1 for the max number of comments have been met.  The calling script must act on this value.</ScriptNotes>
 						<Permission>5,502,504,505,506,</Permission>
-						<EditPermission>5,506,</EditPermission>
+						<EditPermission>5,504,505,506,516,</EditPermission>
 						<ComputerScript>1</ComputerScript>
 						<LocationScript>0</LocationScript>
 						<MaintenanceScript>0</MaintenanceScript>
