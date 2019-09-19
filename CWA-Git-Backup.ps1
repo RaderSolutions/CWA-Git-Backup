@@ -43,6 +43,9 @@ Param(
     $ScriptVersion = "2.0"
     
     $ErrorActionPreference = "Stop"
+
+    # Redirect all output from git on stderr to stdout so posh doesn't throw lots of red text to screen
+    $env:GIT_REDIRECT_STDERR = '2>&1'
     
     #Get/Save config info
     $ConfigFile = "$PSScriptRoot\CWA-Git-Backup-Config.xml"
@@ -1363,6 +1366,8 @@ get-ChildItem -Recurse -File | ? {($_.name -replace '\.xml','') -notin $Searches
 if(Test-Path "$BackupRoot\.git"){
     "Git repo found, doing a push"
     $null = git.exe config --global core.safecrlf false
+    # Redirect all output from git on stderr to stdout as git's default config makes no sense on Windows
+    $env:GIT_REDIRECT_STDERR = '2>&1'
 
     $FoldersCommitted = @()        
 
@@ -1480,8 +1485,8 @@ Various DB properties/schema as well as CWA system definitions (groups, searches
     ## push the rest of the changed files
     $null = git.exe add --all
     $null = git.exe commit -m "Various files"
-    
-    git.exe push
+
+    git.exe push 
 }else{
     "[$BackupRoot] is not a git repo - skipping all git actions"
 }
