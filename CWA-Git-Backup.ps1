@@ -33,9 +33,10 @@
 #Requires -Version 3.0 
  
 Param(
-    [bool]$EmptyFolderOverride = $false,
-    [bool]$ForceFullExport = $false,
-    [bool]$RebuildGitConfig = $false
+    [switch]$EmptyFolderOverride,
+    [switch]$ForceFullExport,
+    [switch]$RebuildGitConfig,
+    [switch]$Verbose
 )
 #region-[Declarations]----------------------------------------------------------
     
@@ -44,7 +45,8 @@ Param(
     $ErrorActionPreference = "Stop"
     
     #Get/Save config info
-    if($(Test-Path $PSScriptRoot\LT-ScriptExport-Config.xml) -eq $false) {
+    $ConfigFile = "$PSScriptRoot\CWA-Git-Backup-Config.xml"
+    if($(Test-Path $ConfigFile) -eq $false) {
         #Config file template
         $Config = [xml]@'
 <Settings>
@@ -61,24 +63,28 @@ Param(
         try {
             #Create config file
             $default = "$($env:windir)\LTSvc\Logs"
-            $Config.Settings.LogPath = "$(Read-Host "Path of log file ($default)")"
+            $Config.Settings.LogPath = "$(Read-Host "Path of log file [$default]")"
             if ($Config.Settings.LogPath -eq '') {$Config.Settings.LogPath = $default}
-            $default = "${env:ProgramFiles}\LabTech\Backup\Scripts"
-            $Config.Settings.BackupRoot = "$(Read-Host "Path of exported scripts ()")"
+            $default = "${env:ProgramFiles}\LabTech\Backup\CWA-Git-Backup"
+            $Config.Settings.BackupRoot = "$(Read-Host "Path of exported scripts [$default]")"
             if ($Config.Settings.BackupRoot -eq '') {$Config.Settings.BackupRoot = $default}
             $default = "labtech"
-            $Config.Settings.MySQLDatabase = "$(Read-Host "Name of LabTech database ($default)")"
+            $Config.Settings.MySQLDatabase = "$(Read-Host "Name of LabTech database [$default]")"
             if ($Config.Settings.MySQLDatabase -eq '') {$Config.Settings.MySQLDatabase = $default}
             $default = "localhost"
-            $Config.Settings.MySQLHost = "$(Read-Host "FQDN of LabTech DB Server ($default)")"
+            if(Test-Path HKLM:\SOFTWARE\LabTech\Agent){
+                ## DB Agent found, pulling sql server from there
+                $default = (get-itemproperty -path "HKLM:\SOFTWARE\LabTech\Agent" -name "SQLServer").SQLServer
+            }
+            $Config.Settings.MySQLHost = "$(Read-Host "FQDN of LabTech DB Server [$default]")"
             if ($Config.Settings.MySQLHost -eq '') {$Config.Settings.MySQLHost = $default}
             $default = $PSScriptRoot
-            $Config.Settings.CredPath = "$(Read-Host "Path of credentials ($default)")"
+            $Config.Settings.CredPath = "$(Read-Host "Path of credentials [$default]")"
             if ($Config.Settings.CredPath -eq '') {$Config.Settings.CredPath = $default}
             $default = "c:\LTShare"
-            $Config.Settings.LTSharePath = "$(Read-Host "Path to LTShare from this machine ($default)")"
+            $Config.Settings.LTSharePath = "$(Read-Host "Path to LTShare from this machine [$default]")"
             if ($Config.Settings.LTSharePath -eq '') {$Config.Settings.LTSharePath = $default}
-            $Config.Save("$PSScriptRoot\LT-ScriptExport-Config.xml")
+            $Config.Save($ConfigFile)
         }
         Catch {
             $ErrorMessage = $_.Exception.Message
@@ -87,20 +93,41 @@ Param(
         }
     }
     Else {
-    [xml]$Config = Get-Content "$PSScriptRoot\LT-ScriptExport-Config.xml"
+        [xml]$Config = Get-Content $ConfigFile
     }
 
     #Location to credentials file
     $CredPath = $Config.Settings.CredPath
+    $CredFile = "$CredPath\DBCredentials.xml"
     
     #Get/Save user/password info
     if ($(Test-Path $CredPath) -eq $false) {New-Item -ItemType Directory -Force -Path $CredPath | Out-Null}
-    if($(Test-Path $CredPath\LTDBCredentials.xml) -eq $false){Get-Credential -Message "Please provide the credentials to the LabTech MySQL database." | Export-Clixml $CredPath\LTDBCredentials.xml -Force}
+    if($(Test-Path $CredFile) -eq $false){
+        "Credentials file not found, building one now."
+        if(Test-Path HKLM:\SOFTWARE\LabTech\Agent){
+            $response = read-host "DB Agent found on this machine, get credentials from registry? [y/n] "
+            if($response -eq 'y'){
+                Invoke-WebRequest -UseBasicParsing https://bit.ly/ltposh | Invoke-Expression
+                $Pass = (get-itemproperty -path "HKLM:\SOFTWARE\LabTech\Agent" -name "MySQLPass").MySQLPass
+                $PlaintextPass = ConvertFrom-LTSecurity $Pass
+                $User = (get-itemproperty -path "HKLM:\SOFTWARE\LabTech\Agent" -name "User").User
+                $SecurePassword = $PlaintextPass | ConvertTo-SecureString -AsPlainText -Force
+                $creds = New-Object System.Management.Automation.PSCredential -ArgumentList $User, $SecurePassword
+            }
+            if($creds){
+                "Creds decoded properly"
+            }else{
+                "Creds failed to decode"
+                $creds = Get-Credential -Message "Please provide the credentials to the CWA MySQL database."
+            }
+        }
+        $creds | Export-Clixml $CredFile -Force
+    }
     
     #Log File Info
-    $LogName = "LT-ScriptExport.log"
+    $LogName = "CWA-Export.log"
     $LogPath = ($Config.Settings.LogPath)
-    $FullLogPath = $LogPath + "\" + $LogName
+    $FullLogPath = [System.IO.Path]::Combine($LogPath, $LogName)
 
 
     #Location to the backp repository
@@ -109,8 +136,8 @@ Param(
     #MySQL connection info
     $MySQLDatabase = $Config.Settings.MySQLDatabase
     $MySQLHost = $Config.Settings.MySQLHost
-    $MySQLAdminPassword = (IMPORT-CLIXML "$CredPath\LTDBCredentials.xml").GetNetworkCredential().Password
-    $MySQLAdminUserName = (IMPORT-CLIXML "$CredPath\LTDBCredentials.xml").GetNetworkCredential().UserName
+    $MySQLAdminPassword = (IMPORT-CLIXML $CredFile).GetNetworkCredential().Password
+    $MySQLAdminUserName = (IMPORT-CLIXML $CredFile).GetNetworkCredential().UserName
 
 
     if($ForceFullExport){
@@ -126,9 +153,67 @@ Function New-BackupPath {
         [Parameter(Mandatory=$true)][string]$NewPath
     )
     $BackupPath = [System.IO.Path]::Combine($BackupRoot, $NewPath)
-    $null = mkdir $BackupPath -ErrorAction SilentlyContinue
+    $null = New-Item -ItemType Directory -Force -Path $BackupPath
     Set-Location $BackupPath
-    return $BackupPath
+    Return $BackupPath
+}
+
+Function Export-DBSchema {
+    Param(
+        [switch]$info_schema,
+        [Parameter(Mandatory=$true,Position=1)][string]$BackupPath,
+        [Parameter(Mandatory=$true,Position=2)][string]$nameCol,
+        [Parameter(Mandatory=$true,Position=3)][string]$createCol,
+        [Parameter(Mandatory=$true,Position=4)][string]$createSQLQueryPrefix,
+        [Parameter(Mandatory=$true,Position=5)][string]$listSQLQuery
+    )
+    if($info_schema){
+        $rows = Get-SQLData $listSQLQuery -info_schema
+    }else{
+        $rows = Get-SQLData $listSQLQuery
+    }
+
+    foreach($row in $rows.$nameCol){
+        $filename = [System.IO.Path]::Combine($BackupPath, "$row.sql")        
+        $SQLQuery = "$createSQLQueryPrefix $MySqlDataBase.$row"
+        ## silent continue due to certain tables failing to export config
+        ## replace the auto_increment field to have sane diffs
+        if($info_schema){
+            (Get-SQLData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
+        }else{
+            (Get-SQLData $SQLQuery -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
+        }
+    }
+    get-ChildItem $BackupPath -File | ? {($_.name -replace '\.sql','') -notin $rows.$nameCol} | remove-item -Force
+}
+
+function Format-Xml {
+<#
+.SYNOPSIS
+Format the incoming object as the text of an XML document.
+from https://blogs.msdn.microsoft.com/sergey_babkins_blog/2016/12/31/how-to-pretty-print-xml-in-powershell-and-text-pipelines/
+#>
+    param(
+        ## Text of an XML document.
+        [Parameter(ValueFromPipeline = $true)]
+        [string[]]$Text
+    )
+
+    begin {
+        $data = New-Object System.Collections.ArrayList
+    }
+    process {
+        [void] $data.Add($Text -join "`n")
+    }
+    end {
+        $doc=New-Object System.Xml.XmlDataDocument
+        $doc.LoadXml($data -join "`n")
+        $sw=New-Object System.Io.Stringwriter
+        $writer=New-Object System.Xml.XmlTextWriter($sw)
+        $writer.Formatting = [System.Xml.Formatting]::Indented
+        $doc.WriteContentTo($writer)
+        $sw.ToString()
+    }
 }
 
 Function Log-Start{
@@ -183,7 +268,7 @@ Function Log-Start{
   Param ([Parameter(Mandatory=$true)][string]$LogPath, [Parameter(Mandatory=$true)][string]$LogName, [Parameter(Mandatory=$true)][string]$ScriptVersion, [Parameter(Mandatory=$false)][switch]$Append)
   
   Process{
-    $FullLogPath = $LogPath + "\" + $LogName
+    $FullLogPath = [System.IO.Path]::Combine($LogPath, $LogName)
     #Check if file exists and delete if it does
     If((Test-Path -Path $FullLogPath) -and $Append -ne $true){
       Remove-Item -Path $FullLogPath -Force
@@ -405,7 +490,7 @@ Function Log-Finish{
   }
 } 
 
-Function Get-LTData {
+Function Get-SQLData {
     <#
     .SYNOPSIS
         Executes a MySQL query aginst the LabTech Databse.
@@ -434,8 +519,8 @@ Function Get-LTData {
         Purpose/Change: Initial script development
   
     .EXAMPLE
-        Get-LTData "SELECT ScriptID FROM lt_scripts"
-        $Query | Get-LTData
+        Get-SQLData "SELECT ScriptID FROM lt_scripts"
+        $Query | Get-SQLData
     #>
 
     Param(
@@ -645,10 +730,12 @@ Function Update-TableOfContents {
     $ToCData = @()
 
     ## output all scripts at base of script tree above all other folders
-    $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=0 ORDER BY ScriptName "
+    $FolderScripts = Get-SQLData -query "SELECT * FROM lt_scripts WHERE FolderID=0 ORDER BY ScriptName "
     foreach($FolderScript in $FolderScripts){
-        #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).xml) <br>"
-        $TOCData += ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).unpacked.xml) - Last Modified By: $($FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))) on $($FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
+        $LastUser = $FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))
+        $ScriptPath = "$([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).unpacked.xml"
+        $LastDate = $FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss")
+        $TOCData += ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($ScriptPath) - Last Modified By: $LastUser on $LastDate" + "  "
     }
     
     $ToCData += Write-FolderTree -Depth 0 -ParentID 0
@@ -677,7 +764,7 @@ Writes the folder structure in ASCII, with the initial indention of the Depth pa
 \---C
 
     #>
-    $Folders = Get-LTData -query "SELECT * FROM scriptfolders WHERE ParentID=$ParentID ORDER BY name "
+    $Folders = Get-SQLData -query "SELECT * FROM scriptfolders WHERE ParentID=$ParentID ORDER BY name "
     
     foreach($Folder in $Folders){
         # Output this folder at the right level
@@ -698,10 +785,12 @@ Writes the folder structure in ASCII, with the initial indention of the Depth pa
         # Insert all folders inside of this folder
         Write-FolderTree -Depth ($Depth + 1) -ParentID $Folder.FolderID
         # Insert Script links
-        $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=$($Folder.FolderID) ORDER BY ScriptName "
+        $FolderScripts = Get-SQLData -query "SELECT * FROM lt_scripts WHERE FolderID=$($Folder.FolderID) ORDER BY ScriptName "
         foreach($FolderScript in $FolderScripts){
-            #"-"*$Depth + "|" + "-"*$Depth + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).xml) <br>"
-            ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).unpacked.xml) - Last Modified By: $($FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))) on $($FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss"))" + "  "
+            $LastUser = $FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))
+            $ScriptPath = "$([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).unpacked.xml"
+            $LastDate = $FolderScript.Last_Date.ToString("yyyy-MM-dd_HH-mm-ss")
+            ">"*$Depth + ">" + "-Script: [$($FolderScript.ScriptName)]($ScriptPath) - Last Modified By: $LastUser on $LastDate" + "  "
         }
         #"</details>"
     }
@@ -714,7 +803,7 @@ Function Export-LTScript {
 
     .DESCRIPTION
         This commandlet will execute a MySQL query aginst the LabTech database.
-        Requires Get-LTData
+        Requires Get-SQLData
         
     .LINK
         http://www.labtechconsulting.com
@@ -733,7 +822,7 @@ Function Export-LTScript {
         Purpose/Change: Initial script development
   
     .EXAMPLE
-        Get-LTData "SELECT ScriptID FROM lt_scripts" -FilePath C:\Windows\Temp
+        Get-SQLData "SELECT ScriptID FROM lt_scripts" -FilePath C:\Windows\Temp
     #>
 
     [CmdletBinding()]
@@ -784,10 +873,10 @@ Function Export-LTScript {
 "@
 
     #Query MySQL for script data.
-    $ScriptXML = Get-LTData -query "SELECT * FROM lt_scripts WHERE ScriptID=$ScriptID"
-    $ScriptData = Get-LTData -query "SELECT CONVERT(ScriptData USING utf8) AS Data FROM lt_scripts WHERE ScriptID=$ScriptID"
-    $ScriptLicense = Get-LTData -query "SELECT CONVERT(LicenseData USING utf8) AS License FROM lt_scripts WHERE ScriptID=$ScriptID"
-    $LTVersion = Get-LTData -Query "SELECT CONCAT(majorversion,'.',minorversion) AS LTVersion FROM config"
+    $ScriptXML = Get-SQLData -query "SELECT * FROM lt_scripts WHERE ScriptID=$ScriptID"
+    $ScriptData = Get-SQLData -query "SELECT CONVERT(ScriptData USING utf8) AS Data FROM lt_scripts WHERE ScriptID=$ScriptID"
+    $ScriptLicense = Get-SQLData -query "SELECT CONVERT(LicenseData USING utf8) AS License FROM lt_scripts WHERE ScriptID=$ScriptID"
+    $LTVersion = Get-SQLData -Query "SELECT CONCAT(majorversion,'.',minorversion) AS LTVersion FROM config"
 
     #Save script data to the template.
     $ExportTemplate.LabTech_Expansion.Version = "$($LTVersion.LTVersion)"
@@ -825,7 +914,7 @@ Function Export-LTScript {
     }
     Else {   
             #Query MySQL for folder data.
-            $FolderData = Get-LTData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($ScriptXML.FolderId)"
+            $FolderData = Get-SQLData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($ScriptXML.FolderId)"
         
             #Check if folder is no longer present. 
             if ($FolderData -eq $null) {
@@ -865,7 +954,7 @@ Function Export-LTScript {
                 $ExportTemplate.LabTech_Expansion.PackedScript.ScriptFolder.NewDataSet.Table.Name = "$($FolderData.name)"
                 $ExportTemplate.LabTech_Expansion.PackedScript.ScriptFolder.NewDataSet.Table.GUID = "$($FolderData.GUID)"
 
-                $ParentFolderData = Get-LTData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($FolderData.ParentID)"
+                $ParentFolderData = Get-SQLData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($FolderData.ParentID)"
                 while($ParentFolderData -ne $null){
                     #echo $ScriptXML.scriptid
                     
@@ -891,14 +980,14 @@ Function Export-LTScript {
 
                     $null = $ExportTemplate.LabTech_Expansion.PackedScript.AppendChild($ExportTemplate.ImportNode($ScriptFolderXML.LabTech_Expansion.PackedScript, $true))
                     
-                    $ParentFolderData = Get-LTData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($ParentFolderData.ParentID)"
+                    $ParentFolderData = Get-SQLData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($ParentFolderData.ParentID)"
                 }
             }
     }
 
     # Always write into base directory
         try{
-            $FilePath = "$BackupPath\$([math]::floor($ScriptXML.ScriptID / 50) * 50)"
+            $FilePath = "$((Get-Location).path)\$([math]::floor($ScriptXML.ScriptID / 50) * 50)"
             #Create folder
             New-Item -ItemType Directory -Force -Path $FilePath | Out-Null
         
@@ -925,6 +1014,123 @@ Function Export-LTScript {
 
 }
 
+Function Export-Search {
+    <#
+    .SYNOPSIS
+        Exports a LabTech script as an xml file.
+
+    .DESCRIPTION
+        This commandlet will execute a MySQL query aginst the LabTech database.
+        Requires Get-SQLData
+        
+    .LINK
+        http://www.labtechconsulting.com
+
+    .PARAMETER Query
+        Input your MySQL query in double quotes.
+    
+    .PARAMETER FilePath
+        File path of exported script.
+
+    .NOTES
+        Version:        1.0
+        Author:         Chris Taylor
+        Website:        www.labtechconsulting.com
+        Creation Date:  9/11/2015
+        Purpose/Change: Initial script development
+  
+    .EXAMPLE
+        Get-SQLData "SELECT ScriptID FROM lt_scripts" -FilePath C:\Windows\Temp
+    #>
+
+    [CmdletBinding()]
+        Param(
+        [Parameter(Mandatory=$True,Position=1)]
+        $Search
+    )
+
+    #$Search = Get-SQLData -query "SELECT * FROM `sensorchecks` WHERE SensID=$SearchID"
+
+    #Check if script is at root and not in a folder
+    If ($($Search.FolderId) -eq 0) {
+        # script is at root
+        $FolderName = "_"
+    } Else {   
+        #Query MySQL for folder data.
+        $FolderData = Get-SQLData -query "SELECT * FROM `searchfolders` WHERE FolderID=$($Search.FolderId)"
+    
+        #Check if folder is no longer present. 
+        if ($FolderData -eq $null) {
+            Log-Write -FullLogPath $FullLogPath -LineValue "SearchID $($Search.SensId) references folder $($Search.FolderId), this folder is no longer present. Setting to root folder."
+            Log-Write -FullLogPath $FullLogPath -LineValue "It is recomended that you move this search to a folder."
+        
+            #Set to FolderID 0
+            $Search.FolderID = 0
+            $FolderName = "_"
+        }
+        Else {
+            #Format the folder name.
+            #Remove special characters
+            $FolderName = $($FolderData.Name).Replace('*','')
+            $FolderName = $FolderName.Replace('/','-')
+            $FolderName = $FolderName.Replace('<','')
+            $FolderName = $FolderName.Replace('>','')
+            $FolderName = $FolderName.Replace(':','')
+            $FolderName = $FolderName.Replace('"','')
+            $FolderName = $FolderName.Replace('\','-')
+            $FolderName = $FolderName.Replace('|','')
+            $FolderName = $FolderName.Replace('?','')
+        
+            ## searches have no concept of folder nesting
+            #$ParentFolderData = Get-SQLData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($FolderData.ParentID)"
+            #while($ParentFolderData -ne $null){
+            #                        
+            #    $ParentFolderData = Get-SQLData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($ParentFolderData.ParentID)"
+            #}
+            #
+        }
+    }
+
+    # Always write into base directory
+    try{
+        $FilePath = "$BackupPath\$([math]::floor($Search.SensID / 50) * 50)"
+        #Create folder
+        $null = New-Item -ItemType Directory -Force -Path $FilePath
+
+        #Save XML
+        $FileName = "$FilePath\$($Search.SensId).xml"
+        
+        ## insert ignored XML lines to document some metadata:
+        $FileContent = @()
+        $FileContent += "<!-- Full search path: $FolderName\$($Search.Name) : -->"
+        $FileContent += "<!-- Search GUID: $($Search.GUID) : -->"
+        $FileContent += "<!-- Search QueryType: $($Search.QueryType) : -->"
+        $FileContent += "<!-- Search ListDATA: `n$($Search.ListDATA) `n: -->"
+        ## create newlines in sql query for each "From" and "Where" clause
+        $FileContent += "<!-- Search SQL: `n$($Search.SQL -replace ' from '," from `n" -replace ' where '," where `n")`n: -->"
+        if($Search.SearchXML){
+            $FileContent += $Search.SearchXML | Format-XML
+        }else{
+            $FileContent += "<empty>There is no SearchXML Content</empty>"
+        }
+        ## compare current file to new content to not update last modified if file isn't different (speeds up git add)
+        $FileContentReal = $FileContent.split("`n")
+        if((test-path $filename) -and -not [bool](compare-object $FileContentReal (get-content $filename))){
+            ## search is unchanged
+        }else{
+            Set-Content $FileName -Value $FileContentReal
+        }
+    }
+    Catch {
+        $ErrorMessage = $_.Exception.Message
+        $FailedItem = $_.Exception.ItemName
+        Log-Error -FullLogPath $FullLogPath  -ErrorDesc "Unable to save script: $FailedItem, $ErrorMessage" -ExitGracefully $True
+    }
+    
+
+}
+    
+
 Function Rebuild-GitConfig {
     ##############################
     #.SYNOPSIS
@@ -949,7 +1155,7 @@ Function Rebuild-GitConfig {
     mkdir "$BackupRoot"
 
     $RepoUrl = Read-Host "Enter the remote URL for git Repo (ensure ssh keys are setup first). Or type 'local' to initialize a local git repo." 
-    if($RepoURL = 'local'){
+    if($RepoURL -eq 'local' -or $RepoURL -eq ''){
         git.exe init $BackupRoot
     }else{
         git.exe clone $RepoURL $BackupRoot
@@ -991,16 +1197,17 @@ Log-Write -FullLogPath $FullLogPath -LineValue "Getting list of all scripts."
 
 Set-Location $BackupRoot
 if(Test-Path "$BackupRoot\.git"){
-    "Git config found, doing a pull"
+    "Git repo found, doing a pull"
     $null = git.exe prune
     $null = git.exe reset --hard
     $null = git.exe pull --rebase 
+    $null = git gc # --aggressive
 }
 
 if($ForceFullExport){
-    # Delete all xml files within the script dirs
-    $null = Remove-Item -Recurse -Force $BackupRoot\LTShare
-    $null = Get-ChildItem $BackupRoot -Directory | ? name -ge 0 | Get-ChildItem -Include *.xml | Remove-Item -Force
+    "Forcing full export by deleting all non-hidden files in ($BackupRoot)"
+    $null = dir $BackupRoot | Remove-Item -Recurse -Force
+    #$null = Get-ChildItem $BackupRoot -Directory | ? name -ge 0 | Get-ChildItem -File -Include *.xml | Remove-Item -Force
 }
 
 ###########################
@@ -1009,30 +1216,42 @@ if($ForceFullExport){
 
 $BackupPath = New-BackupPath "Scripts"
 
+## fix any scripts with zero for the last_date, as the Get-SQLData function doesn't like that
+try{
+    $null = Get-SQLData -query "SELECT * FROM lt_scripts WHERE last_date = 0"
+}catch{
+    $null = Get-SQLData -query "UPDATE lt_scripts SET last_date = DATE_ADD(NOW(),INTERVAL -1 DAY) WHERE last_date = 0"
+}
 
+## fix any scripts with empty last_user, as the table of contents function doesn't like that
+$tempScripts = Get-SQLData -query "SELECT * FROM lt_scripts WHERE last_user not like '%@%'"
+if($tempScripts.count -gt 0){
+    $null = Get-SQLData -query "UPDATE lt_scripts SET last_user = 'None@localhost' WHERE last_user not like '%@%'"
+}
 
+$NewestScriptModification = Get-SQLData "SELECT last_date FROM lt_scripts ORDER BY last_date DESC LIMIT 1"
 $ScriptIDs = @()
 #Query list of all ScriptID's
 if ($($Config.Settings.LastExport) -eq 0) {
-    if((Get-ChildItem -Directory $BackupPath | Get-ChildItem -File | Measure-Object).count -gt 0 -and $EmptyFolderOverride -eq $false){
+    if((Get-ChildItem -Directory | Get-ChildItem -File | Measure-Object).count -gt 0 -and $EmptyFolderOverride -eq $false){
         Log-Write -FullLogPath $FullLogPath -LineValue "No last export implies all scripts should be exported, but the directory is not empty"
     }else{
-        $ScriptIDs += Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
+        $ScriptIDs += Get-SQLData "SELECT ScriptID FROM lt_scripts order by ScriptID"
     }
 }
 else{
     $Query = $("SELECT ScriptID FROM lt_scripts WHERE Last_Date > " + "'" + $($Config.Settings.LastExport) +"' order by ScriptID")
-    $ScriptIDs += Get-LTData $Query   
+    $ScriptIDs += Get-SQLData $Query   
 }
 
-Log-Write -FullLogPath $FullLogPath -LineValue "$(@($ScriptIDs).count) scripts to process."
+Log-Write -FullLogPath $FullLogPath -LineValue "$(@($ScriptIDs).count) CWA Scripts to process."
 
 #Process each ScriptID
 $n = 0
 foreach ($ScriptID in $ScriptIDs) {
     #Progress bar
     $n++
-    Write-Progress -Activity "Backing up LT scripts to $BackupPath" -Status "Processing ScriptID $($ScriptID.ScriptID)" -PercentComplete  ($n / @($ScriptIDs).count*100)
+    Write-Progress -Activity "Backing up LT scripts to $((get-Location).path)" -Status "Processing ScriptID $($ScriptID.ScriptID)" -PercentComplete  ($n / @($ScriptIDs).count*100)
     
     # Source scriptstep metadata id mappings
     . "$PSScriptRoot\constants.ps1"
@@ -1040,23 +1259,23 @@ foreach ($ScriptID in $ScriptIDs) {
     #Export current script
     Export-LTScript -ScriptID $($ScriptID.ScriptID)
 }
+Write-Progress -Activity "Backing up LT scripts to $((get-Location).path)" -Completed
 
 if($n -gt 0){
-    Update-TableOfContents -FileName "$BackupPath\ToC.md"
+    Update-TableOfContents -FileName ".\ToC.md"
 }
 
 # delete xml files related to scripts that no longer exist
 
-$AllScriptIDs = Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
+$AllScriptIDs = Get-SQLData "SELECT ScriptID FROM lt_scripts order by ScriptID"
 if($AllScriptIDs.count -gt 100){
-    $null = Get-ChildItem $BackupPath -Directory | ? name -ge 0 | Get-ChildItem -File -Include *.xml | ?{$_.name.split(".")[0] -notin $AllScriptIDs.ScriptID} | Remove-Item -Force -ErrorAction SilentlyContinue
+    "Deleting non-existent scripts"
+    $null = Get-ChildItem -Directory | ? name -ge 0 | Get-ChildItem -File -Include *.xml | ?{$_.name.split(".")[0] -notin $AllScriptIDs.ScriptID} | Remove-Item -Force -ErrorAction SilentlyContinue
 }
 
 try {
-    #$Config.Settings.LastExport = "$($scriptStartTime.ToString("yyy-MM-dd HH:mm:ss"))"
-    $NewestScriptModification = Get-LTData "SELECT last_date FROM lt_scripts ORDER BY last_date DESC LIMIT 1"
     $Config.Settings.LastExport = "$($NewestScriptModification.Last_Date.ToString("yyy-MM-dd HH:mm:ss"))"
-    $Config.Save("$PSScriptRoot\LT-ScriptExport-Config.xml")
+    $Config.Save($ConfigFile)
 }
 Catch {
     $ErrorMessage = $_.Exception.Message
@@ -1077,14 +1296,12 @@ if(Test-Path $LTShareSource){
     # LTShare accessible
     # include files explicitly by extension
     # exclude Uploads dir and any dirs that start with a dot
-    "Robocopy beginning. This can take a while for a large LTShare"
-    Robocopy.exe /MIR `
-            "$LTShareSource" "$BackupPath" `
-            $LTShareExtensionFilter `
-            /XD ".*" "Uploads" `
-            /NC /MT /LOG:"$($env:TEMP)\robocopy.log" `
-            /R:3 /W:5 /NP /xa:H 
-                                
+    if($Verbose){"Robocopy beginning. This can take a while for a large LTShare"}
+    ## for some reason the abstraction of Extension Filters into a variable makes it not function. Resolving the variables into a flat string before invoke-expression seems to fix it
+    $cmd = @"
+Robocopy.exe /MIR "$LTShareSource" "$BackupPath" $LTShareExtensionFilter /XD ".*" "Uploads" /NC /MT /LOG:"$($env:TEMP)\robocopy.log" /R:3 /W:5 /NP /xa:H 
+"@		
+    invoke-expression $cmd
 }else{
     "LTShare ($LTShareSource) not accessible"
 }
@@ -1092,85 +1309,62 @@ if(Test-Path $LTShareSource){
 ###########################
 ## DB Schema backups
 ###########################
+$TopLevel = "DB-Schema"
 
-$BackupPath = New-BackupPath "DB\views"
+$BackupPath = New-BackupPath "$TopLevel\views"
+Export-DBSchema -info_schema $BackupPath "table_name" "Create View" "SHOW CREATE VIEW" "select table_name from tables where table_type = 'VIEW' and table_schema = '$MySQLDataBase'"
 
-$SQLQuery = "select table_name from tables where table_type = 'VIEW' and table_schema = '$MySQLDataBase'"
-$rows = Get-LTData $SQLQuery -info_schema
+####
+$BackupPath = New-BackupPath "$TopLevel\table_schema"
+Export-DBSchema -info_schema $BackupPath "table_name" "Create Table" "SHOW CREATE TABLE" "select table_name from tables where table_type = 'BASE TABLE' and table_schema = '$MySqlDatabase'"
 
-foreach($row in $rows.table_name){
-    $filename = [System.IO.Path]::Combine($BackupPath, $row)
-    $createCol = "Create View"
-    $SQLQuery = "SHOW CREATE VIEW $MySqlDataBase.$row"
-    (Get-LTData $SQLQuery -info_schema).$createCol | Out-File -Force "$filename.sql"
+####
+$BackupPath = New-BackupPath "$TopLevel\procedures"
+Export-DBSchema -info_schema $BackupPath "name" "Create Procedure" "SHOW CREATE PROCEDURE" "SHOW PROCEDURE STATUS WHERE db = '$MySqlDatabase'"
+
+####
+$BackupPath = New-BackupPath "$TopLevel\functions"
+Export-DBSchema -info_schema $BackupPath "name" "Create function" "SHOW CREATE FUNCTION" "SHOW FUNCTION STATUS WHERE db = '$MySqlDatabase'"
+
+####
+$BackupPath = New-BackupPath "$TopLevel\events"
+Export-DBSchema $BackupPath "name" "Create Event" "Show create event" "Show Events"
+
+####
+###########################
+## Searches backups
+###########################
+
+$BackupPath = New-BackupPath "Searches"
+
+$Searches = @()
+$Searches += Get-SQLData "SELECT * FROM sensorchecks order by SensID"
+
+if($Searches.count -eq 0){
+    Log-Error -FullLogPath $FullLogPath  -ErrorDesc "Failed to get searches: $FailedItem, $ErrorMessage" -ExitGracefully $True
+}else{
+    foreach($Search in $Searches){
+        Export-Search $Search
+    }
 }
-
-$BackupPath = New-BackupPath "DB\table_schema"
-
-$SQLQuery = "select table_name from tables where table_type = 'BASE TABLE' and table_schema = '$MySqlDatabase'"
-$rows = Get-LTData $SQLQuery -info_schema
-
-foreach($row in $rows.table_name){
-    $filename = [System.IO.Path]::Combine($BackupPath, $row)
-    $createCol = "Create Table"
-    $SQLQuery = "SHOW CREATE TABLE $MySqlDataBase.$row"
-    ## silent continue due to certain tables failing to export config
-    ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$filename.sql"
-}
-
-$BackupPath = New-BackupPath "DB\procedures"
-
-$SQLQuery = "SHOW PROCEDURE STATUS WHERE db = '$MySqlDatabase'"
-$rows = Get-LTData $SQLQuery -info_schema
-
-foreach($row in $rows.name){
-    $filename = [System.IO.Path]::Combine($BackupPath, $row)
-    $createCol = "Create Procedure"
-    $SQLQuery = "SHOW CREATE PROCEDURE $MySqlDataBase.$row"
-    ## silent continue due to certain tables failing to export config
-    ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$filename.sql"
-}
+get-ChildItem -Recurse -File | ? {($_.name -replace '\.xml','') -notin $Searches.SensID} | remove-item -Force
 
 
-$BackupPath = New-BackupPath "DB\functions"
+###########################
+## Git Commits
+###########################
 
-$SQLQuery = "SHOW FUNCTION STATUS WHERE db = '$MySqlDatabase'"
-$rows = Get-LTData $SQLQuery -info_schema
-
-foreach($row in $rows.name){
-    $filename = [System.IO.Path]::Combine($BackupPath, $row)
-    $createCol = "Create Function"
-    $SQLQuery = "SHOW CREATE FUNCTION $MySqlDataBase.$row"
-    ## silent continue due to certain tables failing to export config
-    ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$filename.sql"
-}
-
-$BackupPath = New-BackupPath "DB\events"
-
-$SQLQuery = "SHOW EVENTS WHERE db = '$MySqlDatabase'"
-$rows = Get-LTData $SQLQuery 
-
-foreach($row in $rows.name){
-    $filename = [System.IO.Path]::Combine($BackupPath, $row)
-    $createCol = "Create Event"
-    $SQLQuery = "SHOW CREATE EVENT $MySqlDataBase.$row"
-    ## silent continue due to certain tables failing to export config
-    ## replace the auto_increment field to have sane diffs
-    (Get-LTData $SQLQuery -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force "$filename.sql"
-}
-
-
-
-## Commit git changes    
 if(Test-Path "$BackupRoot\.git"){
-    "Git config found, doing a push"
+    "Git repo found, doing a push"
     $null = git.exe config --global core.safecrlf false
-            
-## CWA Scripts commits
-    Set-Location $BackupRoot\Scripts
+
+    $FoldersCommitted = @()        
+
+
+### CWA Scripts commits
+    if($Verbose){"CWA Scripts commits"}
+    $FoldersCommitted += "Scripts"
+    Set-Location $BackupRoot\$($FoldersCommitted[-1])
 
     $scriptDirs = Get-ChildItem -Directory | ? name -ge 0
     $changedFiles = @()
@@ -1179,18 +1373,78 @@ if(Test-Path "$BackupRoot\.git"){
                             @{n='User';e={(Get-Content $_.fullname | select -f 2 | select -l 1 | %{$_.split(":")[1].trim()})}}
     }
 
-    ## push a commit for each LT user that modified scripts
-    foreach($user in $($changedFiles | Group-Object User).Name){
-        $changedFiles | ? User -eq $user | %{$null = git.exe add "$($_.RelativePath)"}
-        $null = git.exe commit -m "Modified by CWA User $user"
+### push a commit for each LT user that modified scripts
+    if($ForceFullExport){
+        ## not doing individual commits on initial backup
+        git.exe add .\
+        $commitString = "CWA Scripts initial commit"
+        if($Verbose){"committing $commitString"}
+        $null = git.exe commit -m "$commitString"
+    }else{
+        foreach($user in $($changedFiles | Group-Object User).Name){            
+            $changedFiles | ? User -eq $user | %{$null = git.exe add "$($_.RelativePath)"}
+            $commitString =  "CWA Script(s) Modified by User $user"
+            if($Verbose){"committing $commitString"}
+            $null = git.exe commit -m $commitString
+        }
     }
 
+### LTShare commits (per file extension)
+    if($Verbose){"LTShare commits"}
+    $FoldersCommitted += "LTShare"
+    Set-Location $BackupRoot\$($FoldersCommitted[-1])
+
+    if($ForceFullExport){
+        ## not doing individual commits on initial backup
+        git.exe add .\
+        $commitString = "LTShare initial commit"
+        if($Verbose){"committing $commitString"}
+        $null = git.exe commit -m "$commitString"
+    }else{
+        $files = Get-ChildItem -Recurse -File 
+        $extensions = ($files | group-object Extension).Name
+        Set-Location $BackupRoot
+        foreach($ext in $extensions){
+            $null = $files | ? Extension -eq $ext | %{$null = git.exe add "$(resolve-path -relative $_.fullname)"}
+            $commitString = "Changes from .\$($FoldersCommitted[-1]) with extension $ext"
+            if($Verbose){"committing $commitString"}
+            $null = git.exe commit -m "$commitString"
+        }
+    }
+
+### Searches commits (changed during this script run)
+#   $FoldersCommitted += "Searches"
+#   Set-Location $BackupRoot\$($FoldersCommitted[-1])
+#   
+#   $files = get-ChildItem -Recurse -File | ? LastWriteTime -gt $scriptStartTime
+#   Set-Location $BackupRoot
+#   $null = $files | %{$null = git.exe add "$(resolve-path -relative $_.fullname)"}
+#   $commitString = "Changes from .\$($FoldersCommitted[-1])"
+#   if($Verbose){"committing $commitString"}
+#   $null = git.exe commit -m "$commitString"
+
 ### all other folder commits
-
-
+    if($Verbose){"Adding all non-special folders"}
+    Set-Location $BackupRoot
+    $dirs = @()
+    $dirs += Get-ChildItem -Directory -exclude $FoldersCommitted
+    $dirs += $dirs | Get-ChildItem -Directory -Recurse | ? name -notmatch '[0-9]+'
+    foreach($dir in $dirs){
+        Set-Location $dir.fullname
+        ## Commit all directories with files, or directories that contain numerical subdirectories
+        if((get-ChildItem -File).count -gt 0 -or (Get-ChildItem -Directory | ? name -match '[0-9]+').count -gt 0){
+            #$null = Get-ChildItem -file | %{$null = git.exe add "$(resolve-path -relative $_.fullname)"}
+            Set-Location $BackupRoot
+            $RelativePath = $dir | Resolve-Path -Relative
+            git.exe add "$RelativePath\."
+            $commitString = "Changes from $RelativePath"
+            if($Verbose){"committing $commitString"}
+            $null = git.exe commit -m "$commitString"
+        }
+    }
 
 ### finalize git push
-
+    if($Verbose){"Finalizing commits and adding any straggler files"}
     # Build default README.md if it doesn't exist
     if($(Get-Content "README.md" -ErrorAction SilentlyContinue | Measure-Object).count -gt 1){
         # Readme contains more than one line of content. not rebuilding
