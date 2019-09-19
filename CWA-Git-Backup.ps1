@@ -103,6 +103,7 @@ Param(
     #Get/Save user/password info
     if ($(Test-Path $CredPath) -eq $false) {New-Item -ItemType Directory -Force -Path $CredPath | Out-Null}
     if($(Test-Path $CredFile) -eq $false){
+        "Credentials file not found, building one now."
         if(Test-Path HKLM:\SOFTWARE\LabTech\Agent){
             $response = read-host "DB Agent found on this machine, get credentials from registry? [y/n] "
             if($response -eq 'y'){
@@ -157,7 +158,7 @@ Function New-BackupPath {
     Return $BackupPath
 }
 
-Function Backup-DBSchema {
+Function Export-DBSchema {
     Param(
         [switch]$info_schema,
         [Parameter(Mandatory=$true,Position=1)][string]$BackupPath,
@@ -167,9 +168,9 @@ Function Backup-DBSchema {
         [Parameter(Mandatory=$true,Position=5)][string]$listSQLQuery
     )
     if($info_schema){
-        $rows = Get-LTData $listSQLQuery -info_schema
+        $rows = Get-SQLData $listSQLQuery -info_schema
     }else{
-        $rows = Get-LTData $listSQLQuery
+        $rows = Get-SQLData $listSQLQuery
     }
 
     foreach($row in $rows.$nameCol){
@@ -178,9 +179,9 @@ Function Backup-DBSchema {
         ## silent continue due to certain tables failing to export config
         ## replace the auto_increment field to have sane diffs
         if($info_schema){
-            (Get-LTData $SQLQuery -info_schema -ErrorAction Continue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
+            (Get-SQLData $SQLQuery -info_schema -ErrorAction Continue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
         }else{
-            (Get-LTData $SQLQuery -ErrorAction Continue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
+            (Get-SQLData $SQLQuery -ErrorAction Continue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
         }
     }
     get-ChildItem $BackupPath -File | ? {($_.name -replace '\.sql','') -notin $rows.$nameCol} | remove-item -Force
@@ -489,7 +490,7 @@ Function Log-Finish{
   }
 } 
 
-Function Get-LTData {
+Function Get-SQLData {
     <#
     .SYNOPSIS
         Executes a MySQL query aginst the LabTech Databse.
@@ -518,8 +519,8 @@ Function Get-LTData {
         Purpose/Change: Initial script development
   
     .EXAMPLE
-        Get-LTData "SELECT ScriptID FROM lt_scripts"
-        $Query | Get-LTData
+        Get-SQLData "SELECT ScriptID FROM lt_scripts"
+        $Query | Get-SQLData
     #>
 
     Param(
@@ -729,7 +730,7 @@ Function Update-TableOfContents {
     $ToCData = @()
 
     ## output all scripts at base of script tree above all other folders
-    $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=0 ORDER BY ScriptName "
+    $FolderScripts = Get-SQLData -query "SELECT * FROM lt_scripts WHERE FolderID=0 ORDER BY ScriptName "
     foreach($FolderScript in $FolderScripts){
         $LastUser = $FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))
         $ScriptPath = "$([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).unpacked.xml"
@@ -763,7 +764,7 @@ Writes the folder structure in ASCII, with the initial indention of the Depth pa
 \---C
 
     #>
-    $Folders = Get-LTData -query "SELECT * FROM scriptfolders WHERE ParentID=$ParentID ORDER BY name "
+    $Folders = Get-SQLData -query "SELECT * FROM scriptfolders WHERE ParentID=$ParentID ORDER BY name "
     
     foreach($Folder in $Folders){
         # Output this folder at the right level
@@ -784,7 +785,7 @@ Writes the folder structure in ASCII, with the initial indention of the Depth pa
         # Insert all folders inside of this folder
         Write-FolderTree -Depth ($Depth + 1) -ParentID $Folder.FolderID
         # Insert Script links
-        $FolderScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE FolderID=$($Folder.FolderID) ORDER BY ScriptName "
+        $FolderScripts = Get-SQLData -query "SELECT * FROM lt_scripts WHERE FolderID=$($Folder.FolderID) ORDER BY ScriptName "
         foreach($FolderScript in $FolderScripts){
             $LastUser = $FolderScript.Last_User.Substring(0, $FolderScript.Last_User.IndexOf('@'))
             $ScriptPath = "$([math]::floor($FolderScript.ScriptID / 50) * 50)/$($FolderScript.ScriptID).unpacked.xml"
@@ -802,7 +803,7 @@ Function Export-LTScript {
 
     .DESCRIPTION
         This commandlet will execute a MySQL query aginst the LabTech database.
-        Requires Get-LTData
+        Requires Get-SQLData
         
     .LINK
         http://www.labtechconsulting.com
@@ -821,7 +822,7 @@ Function Export-LTScript {
         Purpose/Change: Initial script development
   
     .EXAMPLE
-        Get-LTData "SELECT ScriptID FROM lt_scripts" -FilePath C:\Windows\Temp
+        Get-SQLData "SELECT ScriptID FROM lt_scripts" -FilePath C:\Windows\Temp
     #>
 
     [CmdletBinding()]
@@ -872,10 +873,10 @@ Function Export-LTScript {
 "@
 
     #Query MySQL for script data.
-    $ScriptXML = Get-LTData -query "SELECT * FROM lt_scripts WHERE ScriptID=$ScriptID"
-    $ScriptData = Get-LTData -query "SELECT CONVERT(ScriptData USING utf8) AS Data FROM lt_scripts WHERE ScriptID=$ScriptID"
-    $ScriptLicense = Get-LTData -query "SELECT CONVERT(LicenseData USING utf8) AS License FROM lt_scripts WHERE ScriptID=$ScriptID"
-    $LTVersion = Get-LTData -Query "SELECT CONCAT(majorversion,'.',minorversion) AS LTVersion FROM config"
+    $ScriptXML = Get-SQLData -query "SELECT * FROM lt_scripts WHERE ScriptID=$ScriptID"
+    $ScriptData = Get-SQLData -query "SELECT CONVERT(ScriptData USING utf8) AS Data FROM lt_scripts WHERE ScriptID=$ScriptID"
+    $ScriptLicense = Get-SQLData -query "SELECT CONVERT(LicenseData USING utf8) AS License FROM lt_scripts WHERE ScriptID=$ScriptID"
+    $LTVersion = Get-SQLData -Query "SELECT CONCAT(majorversion,'.',minorversion) AS LTVersion FROM config"
 
     #Save script data to the template.
     $ExportTemplate.LabTech_Expansion.Version = "$($LTVersion.LTVersion)"
@@ -913,7 +914,7 @@ Function Export-LTScript {
     }
     Else {   
             #Query MySQL for folder data.
-            $FolderData = Get-LTData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($ScriptXML.FolderId)"
+            $FolderData = Get-SQLData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($ScriptXML.FolderId)"
         
             #Check if folder is no longer present. 
             if ($FolderData -eq $null) {
@@ -953,7 +954,7 @@ Function Export-LTScript {
                 $ExportTemplate.LabTech_Expansion.PackedScript.ScriptFolder.NewDataSet.Table.Name = "$($FolderData.name)"
                 $ExportTemplate.LabTech_Expansion.PackedScript.ScriptFolder.NewDataSet.Table.GUID = "$($FolderData.GUID)"
 
-                $ParentFolderData = Get-LTData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($FolderData.ParentID)"
+                $ParentFolderData = Get-SQLData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($FolderData.ParentID)"
                 while($ParentFolderData -ne $null){
                     #echo $ScriptXML.scriptid
                     
@@ -979,7 +980,7 @@ Function Export-LTScript {
 
                     $null = $ExportTemplate.LabTech_Expansion.PackedScript.AppendChild($ExportTemplate.ImportNode($ScriptFolderXML.LabTech_Expansion.PackedScript, $true))
                     
-                    $ParentFolderData = Get-LTData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($ParentFolderData.ParentID)"
+                    $ParentFolderData = Get-SQLData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($ParentFolderData.ParentID)"
                 }
             }
     }
@@ -1020,7 +1021,7 @@ Function Export-Search {
 
     .DESCRIPTION
         This commandlet will execute a MySQL query aginst the LabTech database.
-        Requires Get-LTData
+        Requires Get-SQLData
         
     .LINK
         http://www.labtechconsulting.com
@@ -1039,7 +1040,7 @@ Function Export-Search {
         Purpose/Change: Initial script development
   
     .EXAMPLE
-        Get-LTData "SELECT ScriptID FROM lt_scripts" -FilePath C:\Windows\Temp
+        Get-SQLData "SELECT ScriptID FROM lt_scripts" -FilePath C:\Windows\Temp
     #>
 
     [CmdletBinding()]
@@ -1048,14 +1049,14 @@ Function Export-Search {
         $Search
     )
 
-    #$Search = Get-LTData -query "SELECT * FROM `sensorchecks` WHERE SensID=$SearchID"
+    #$Search = Get-SQLData -query "SELECT * FROM `sensorchecks` WHERE SensID=$SearchID"
 
     #Check if script is at root and not in a folder
     If ($($Search.FolderId) -eq 0) {
         # script is at root
     } Else {   
         #Query MySQL for folder data.
-        $FolderData = Get-LTData -query "SELECT * FROM `searchfolders` WHERE FolderID=$($Search.FolderId)"
+        $FolderData = Get-SQLData -query "SELECT * FROM `searchfolders` WHERE FolderID=$($Search.FolderId)"
     
         #Check if folder is no longer present. 
         if ($FolderData -eq $null) {
@@ -1080,10 +1081,10 @@ Function Export-Search {
             $FolderName = $FolderName.Replace('?','')
         
             ## searches have no concept of folder nesting
-            #$ParentFolderData = Get-LTData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($FolderData.ParentID)"
+            #$ParentFolderData = Get-SQLData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($FolderData.ParentID)"
             #while($ParentFolderData -ne $null){
             #                        
-            #    $ParentFolderData = Get-LTData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($ParentFolderData.ParentID)"
+            #    $ParentFolderData = Get-SQLData -query "SELECT * FROM `scriptfolders` WHERE FolderID=$($ParentFolderData.ParentID)"
             #}
             #
         }
@@ -1209,32 +1210,32 @@ if($ForceFullExport){
 
 $BackupPath = New-BackupPath "Scripts"
 
-## fix any scripts with zero for the last_date, as the Get-LTData function doesn't like that
+## fix any scripts with zero for the last_date, as the Get-SQLData function doesn't like that
 try{
-    $null = Get-LTData -query "SELECT * FROM lt_scripts WHERE last_date = 0"
+    $null = Get-SQLData -query "SELECT * FROM lt_scripts WHERE last_date = 0"
 }catch{
-    $null = Get-LTData -query "UPDATE lt_scripts SET last_date = DATE_ADD(NOW(),INTERVAL -1 DAY) WHERE last_date = 0"
+    $null = Get-SQLData -query "UPDATE lt_scripts SET last_date = DATE_ADD(NOW(),INTERVAL -1 DAY) WHERE last_date = 0"
 }
 
 ## fix any scripts with empty last_user, as the table of contents function doesn't like that
-$tempScripts = Get-LTData -query "SELECT * FROM lt_scripts WHERE last_user not like '%@%'"
+$tempScripts = Get-SQLData -query "SELECT * FROM lt_scripts WHERE last_user not like '%@%'"
 if($tempScripts.count -gt 0){
-    $null = Get-LTData -query "UPDATE lt_scripts SET last_user = 'None@localhost' WHERE last_user not like '%@%'"
+    $null = Get-SQLData -query "UPDATE lt_scripts SET last_user = 'None@localhost' WHERE last_user not like '%@%'"
 }
 
-$NewestScriptModification = Get-LTData "SELECT last_date FROM lt_scripts ORDER BY last_date DESC LIMIT 1"
+$NewestScriptModification = Get-SQLData "SELECT last_date FROM lt_scripts ORDER BY last_date DESC LIMIT 1"
 $ScriptIDs = @()
 #Query list of all ScriptID's
 if ($($Config.Settings.LastExport) -eq 0) {
     if((Get-ChildItem -Directory | Get-ChildItem -File | Measure-Object).count -gt 0 -and $EmptyFolderOverride -eq $false){
         Log-Write -FullLogPath $FullLogPath -LineValue "No last export implies all scripts should be exported, but the directory is not empty"
     }else{
-        $ScriptIDs += Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
+        $ScriptIDs += Get-SQLData "SELECT ScriptID FROM lt_scripts order by ScriptID"
     }
 }
 else{
     $Query = $("SELECT ScriptID FROM lt_scripts WHERE Last_Date > " + "'" + $($Config.Settings.LastExport) +"' order by ScriptID")
-    $ScriptIDs += Get-LTData $Query   
+    $ScriptIDs += Get-SQLData $Query   
 }
 
 Log-Write -FullLogPath $FullLogPath -LineValue "$(@($ScriptIDs).count) scripts to process."
@@ -1259,7 +1260,7 @@ if($n -gt 0){
 
 # delete xml files related to scripts that no longer exist
 
-$AllScriptIDs = Get-LTData "SELECT ScriptID FROM lt_scripts order by ScriptID"
+$AllScriptIDs = Get-SQLData "SELECT ScriptID FROM lt_scripts order by ScriptID"
 if($AllScriptIDs.count -gt 100){
     "Deleting non-existent scripts"
     $null = Get-ChildItem -Directory | ? name -ge 0 | Get-ChildItem -File -Include *.xml | ?{$_.name.split(".")[0] -notin $AllScriptIDs.ScriptID} | Remove-Item -Force -ErrorAction SilentlyContinue
@@ -1304,23 +1305,23 @@ Robocopy.exe /MIR "$LTShareSource" "$BackupPath" $LTShareExtensionFilter /XD ".*
 $TopLevel = "DB-Schema"
 
 $BackupPath = New-BackupPath "$TopLevel\views"
-Backup-DBSchema -info_schema $BackupPath "table_name" "Create View" "SHOW CREATE VIEW" "select table_name from tables where table_type = 'VIEW' and table_schema = '$MySQLDataBase'"
+Export-DBSchema -info_schema $BackupPath "table_name" "Create View" "SHOW CREATE VIEW" "select table_name from tables where table_type = 'VIEW' and table_schema = '$MySQLDataBase'"
 
 ####
 $BackupPath = New-BackupPath "$TopLevel\table_schema"
-Backup-DBSchema -info_schema $BackupPath "table_name" "Create Table" "SHOW CREATE TABLE" "select table_name from tables where table_type = 'BASE TABLE' and table_schema = '$MySqlDatabase'"
+Export-DBSchema -info_schema $BackupPath "table_name" "Create Table" "SHOW CREATE TABLE" "select table_name from tables where table_type = 'BASE TABLE' and table_schema = '$MySqlDatabase'"
 
 ####
 $BackupPath = New-BackupPath "$TopLevel\procedures"
-Backup-DBSchema -info_schema $BackupPath "name" "Create Procedure" "SHOW CREATE PROCEDURE" "SHOW PROCEDURE STATUS WHERE db = '$MySqlDatabase'"
+Export-DBSchema -info_schema $BackupPath "name" "Create Procedure" "SHOW CREATE PROCEDURE" "SHOW PROCEDURE STATUS WHERE db = '$MySqlDatabase'"
 
 ####
 $BackupPath = New-BackupPath "$TopLevel\functions"
-Backup-DBSchema -info_schema $BackupPath "name" "Create function" "SHOW CREATE FUNCTION" "SHOW FUNCTION STATUS WHERE db = '$MySqlDatabase'"
+Export-DBSchema -info_schema $BackupPath "name" "Create function" "SHOW CREATE FUNCTION" "SHOW FUNCTION STATUS WHERE db = '$MySqlDatabase'"
 
 ####
 $BackupPath = New-BackupPath "$TopLevel\events"
-Backup-DBSchema $BackupPath "name" "Create Event" "Show create event" "Show Events"
+Export-DBSchema $BackupPath "name" "Create Event" "Show create event" "Show Events"
 
 ####
 ###########################
@@ -1330,7 +1331,7 @@ Backup-DBSchema $BackupPath "name" "Create Event" "Show create event" "Show Even
 $BackupPath = New-BackupPath "Searches"
 
 $Searches = @()
-$Searches += Get-LTData "SELECT * FROM sensorchecks order by SensID"
+$Searches += Get-SQLData "SELECT * FROM sensorchecks order by SensID"
 
 if($Searches.count -eq 0){
     Log-Error -FullLogPath $FullLogPath  -ErrorDesc "Failed to get searches: $FailedItem, $ErrorMessage" -ExitGracefully $True
