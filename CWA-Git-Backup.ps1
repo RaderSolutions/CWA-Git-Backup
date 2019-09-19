@@ -131,6 +131,10 @@ Param(
     $LogPath = ($Config.Settings.LogPath)
     $FullLogPath = [System.IO.Path]::Combine($LogPath, $LogName)
 
+    #Robocopy Log File Info
+    $LogNameRobo = "CWA-Export-robocopy.log"
+    $LogPath = ($Config.Settings.LogPath)
+    $FullLogPathRobo = [System.IO.Path]::Combine($LogPath, $LogName)
 
     #Location to the backp repository
     $BackupRoot = $Config.Settings.BackupRoot
@@ -1301,7 +1305,7 @@ if(Test-Path $LTShareSource){
     if($Verbose){"Robocopy beginning. This can take a while for a large LTShare"}
     ## for some reason the abstraction of Extension Filters into a variable makes it not function. Resolving the variables into a flat string before invoke-expression seems to fix it
     $cmd = @"
-Robocopy.exe /MIR "$LTShareSource" "$BackupPath" $LTShareExtensionFilter /XD ".*" "Uploads" /NC /MT /LOG:"$($env:TEMP)\robocopy.log" /R:3 /W:5 /NP /xa:H 
+Robocopy.exe /MIR "$LTShareSource" "$BackupPath" $LTShareExtensionFilter /XD ".*" "Uploads" /NC /MT /LOG:"$FullLogPathRobo" /R:3 /W:5 /NP /xa:H 
 "@		
     invoke-expression $cmd
 }else{
