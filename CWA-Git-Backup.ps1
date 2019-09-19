@@ -1472,7 +1472,7 @@ This repo should contain xml files from all scripts in the CWA system. If the ex
 
 ## Script Links
 
-The scripts are sorted into folders based on their script ID, and [a table of contents should exist in this same directory](.\ToC.md) with mappings between script names and script IDs.
+The scripts are sorted into folders based on their script ID, and [a table of contents should exist in this same directory](./Scripts/ToC.md) with mappings between script names and script IDs.
 
 ## Other various systems 
 
