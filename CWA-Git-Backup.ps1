@@ -179,9 +179,9 @@ Function Export-DBSchema {
         ## silent continue due to certain tables failing to export config
         ## replace the auto_increment field to have sane diffs
         if($info_schema){
-            (Get-SQLData $SQLQuery -info_schema -ErrorAction Continue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
+            (Get-SQLData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
         }else{
-            (Get-SQLData $SQLQuery -ErrorAction Continue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
+            (Get-SQLData $SQLQuery -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
         }
     }
     get-ChildItem $BackupPath -File | ? {($_.name -replace '\.sql','') -notin $rows.$nameCol} | remove-item -Force
@@ -1054,6 +1054,7 @@ Function Export-Search {
     #Check if script is at root and not in a folder
     If ($($Search.FolderId) -eq 0) {
         # script is at root
+        $FolderName = "_"
     } Else {   
         #Query MySQL for folder data.
         $FolderData = Get-SQLData -query "SELECT * FROM `searchfolders` WHERE FolderID=$($Search.FolderId)"
@@ -1065,7 +1066,7 @@ Function Export-Search {
         
             #Set to FolderID 0
             $Search.FolderID = 0
-            $FolderName = ""
+            $FolderName = "_"
         }
         Else {
             #Format the folder name.
@@ -1092,7 +1093,7 @@ Function Export-Search {
 
     # Always write into base directory
     try{
-        $FilePath = ".\$([math]::floor($Search.SensID / 50) * 50)"
+        $FilePath = "$BackupPath\$([math]::floor($Search.SensID / 50) * 50)"
         #Create folder
         $null = New-Item -ItemType Directory -Force -Path $FilePath
 
@@ -1104,17 +1105,21 @@ Function Export-Search {
         $FileContent += "<!-- Full search path: $FolderName\$($Search.Name) : -->"
         $FileContent += "<!-- Search GUID: $($Search.GUID) : -->"
         $FileContent += "<!-- Search QueryType: $($Search.QueryType) : -->"
-        $FileContent += "<!-- Search ListDATA: `r`n$($Search.ListDATA) `r`n: -->"
+        $FileContent += "<!-- Search ListDATA: `n$($Search.ListDATA) `n: -->"
         ## create newlines in sql query for each "From" and "Where" clause
-        $FileContent += "<!-- Search SQL: `r`n$($Search.SQL -replace ' from '," from `r`n" -replace ' where '," where `r`n")`r`n: -->"
+        $FileContent += "<!-- Search SQL: `n$($Search.SQL -replace ' from '," from `n" -replace ' where '," where `n")`n: -->"
         if($Search.SearchXML){
             $FileContent += $Search.SearchXML | Format-XML
         }else{
             $FileContent += "<empty>There is no SearchXML Content</empty>"
         }
-
-        Set-Content $FileName -Value $ScriptMetadata,$FileContent
-
+        ## compare current file to new content to not update last modified if file isn't different (speeds up git add)
+        $FileContentReal = $FileContent.split("`n")
+        if((test-path $filename) -and -not [bool](compare-object $FileContentReal (get-content $filename))){
+            ## search is unchanged
+        }else{
+            Set-Content $FileName -Value $FileContentReal
+        }
     }
     Catch {
         $ErrorMessage = $_.Exception.Message
@@ -1192,14 +1197,15 @@ Log-Write -FullLogPath $FullLogPath -LineValue "Getting list of all scripts."
 
 Set-Location $BackupRoot
 if(Test-Path "$BackupRoot\.git"){
-    "Git config found, doing a pull"
+    "Git repo found, doing a pull"
     $null = git.exe prune
     $null = git.exe reset --hard
     $null = git.exe pull --rebase 
+    $null = git gc # --aggressive
 }
 
 if($ForceFullExport){
-    # Delete all non-hidden files
+    "Forcing full export by deleting all non-hidden files in ($BackupRoot)"
     $null = dir $BackupRoot | Remove-Item -Recurse -Force
     #$null = Get-ChildItem $BackupRoot -Directory | ? name -ge 0 | Get-ChildItem -File -Include *.xml | Remove-Item -Force
 }
@@ -1253,6 +1259,7 @@ foreach ($ScriptID in $ScriptIDs) {
     #Export current script
     Export-LTScript -ScriptID $($ScriptID.ScriptID)
 }
+Write-Progress -Activity "Backing up LT scripts to $((get-Location).path)" -Completed
 
 if($n -gt 0){
     Update-TableOfContents -FileName ".\ToC.md"
@@ -1348,13 +1355,16 @@ get-ChildItem -Recurse -File | ? {($_.name -replace '\.xml','') -notin $Searches
 ###########################
 
 if(Test-Path "$BackupRoot\.git"){
-    "Git config found, doing a push"
+    "Git repo found, doing a push"
     $null = git.exe config --global core.safecrlf false
 
     $FoldersCommitted = @()        
+
+
 ### CWA Scripts commits
-    Set-Location $BackupRoot\Scripts
+    if($Verbose){"CWA Scripts commits"}
     $FoldersCommitted += "Scripts"
+    Set-Location $BackupRoot\$($FoldersCommitted[-1])
 
     $scriptDirs = Get-ChildItem -Directory | ? name -ge 0
     $changedFiles = @()
@@ -1367,26 +1377,28 @@ if(Test-Path "$BackupRoot\.git"){
     if($ForceFullExport){
         ## not doing individual commits on initial backup
         git.exe add .\
-        $commitString = "CW Scripts initial commit"
-        if($Verbose){$commitString}
+        $commitString = "CWA Scripts initial commit"
+        if($Verbose){"committing $commitString"}
         $null = git.exe commit -m "$commitString"
     }else{
-        foreach($user in $($changedFiles | Group-Object User).Name){
-            if($Verbose){"Committing script changes"}
+        foreach($user in $($changedFiles | Group-Object User).Name){            
             $changedFiles | ? User -eq $user | %{$null = git.exe add "$($_.RelativePath)"}
-            $null = git.exe commit -m "Modified by CWA User $user"
+            $commitString =  "CWA Script(s) Modified by User $user"
+            if($Verbose){"committing $commitString"}
+            $null = git.exe commit -m $commitString
         }
     }
 
-### push a commit for each file extention in LTShare
-    Set-Location $BackupRoot\LTShare
+### LTShare commits (per file extension)
+    if($Verbose){"LTShare commits"}
     $FoldersCommitted += "LTShare"
+    Set-Location $BackupRoot\$($FoldersCommitted[-1])
 
     if($ForceFullExport){
         ## not doing individual commits on initial backup
         git.exe add .\
         $commitString = "LTShare initial commit"
-        if($Verbose){$commitString}
+        if($Verbose){"committing $commitString"}
         $null = git.exe commit -m "$commitString"
     }else{
         $files = Get-ChildItem -Recurse -File 
@@ -1394,15 +1406,25 @@ if(Test-Path "$BackupRoot\.git"){
         Set-Location $BackupRoot
         foreach($ext in $extensions){
             $null = $files | ? Extension -eq $ext | %{$null = git.exe add "$(resolve-path -relative $_.fullname)"}
-            $commitString = "Changes from LTShare with extension $ext"
-            if($Verbose){$commitString}
+            $commitString = "Changes from .\$($FoldersCommitted[-1]) with extension $ext"
+            if($Verbose){"committing $commitString"}
             $null = git.exe commit -m "$commitString"
         }
     }
-    
+
+### Searches commits (changed during this script run)
+#   $FoldersCommitted += "Searches"
+#   Set-Location $BackupRoot\$($FoldersCommitted[-1])
+#   
+#   $files = get-ChildItem -Recurse -File | ? LastWriteTime -gt $scriptStartTime
+#   Set-Location $BackupRoot
+#   $null = $files | %{$null = git.exe add "$(resolve-path -relative $_.fullname)"}
+#   $commitString = "Changes from .\$($FoldersCommitted[-1])"
+#   if($Verbose){"committing $commitString"}
+#   $null = git.exe commit -m "$commitString"
 
 ### all other folder commits
-
+    if($Verbose){"Adding all non-special folders"}
     Set-Location $BackupRoot
     $dirs = @()
     $dirs += Get-ChildItem -Directory -exclude $FoldersCommitted
@@ -1416,13 +1438,13 @@ if(Test-Path "$BackupRoot\.git"){
             $RelativePath = $dir | Resolve-Path -Relative
             git.exe add "$RelativePath\."
             $commitString = "Changes from $RelativePath"
-            if($Verbose){$commitString}
+            if($Verbose){"committing $commitString"}
             $null = git.exe commit -m "$commitString"
         }
     }
 
 ### finalize git push
-
+    if($Verbose){"Finalizing commits and adding any straggler files"}
     # Build default README.md if it doesn't exist
     if($(Get-Content "README.md" -ErrorAction SilentlyContinue | Measure-Object).count -gt 1){
         # Readme contains more than one line of content. not rebuilding
