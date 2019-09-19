@@ -920,7 +920,7 @@ Function Export-LTScript {
         
             #Check if folder is no longer present. 
             if ($FolderData -eq $null) {
-                Log-Write -FullLogPath $FullLogPath -LineValue "ScriptID $($ScriptXML.ScriptId) references folder $($ScriptXML.FolderId), this folder is no longer present. Setting to root folder."
+                Log-Write -FullLogPath $FullLogPath -LineValue "ScriptID $($ScriptXML.ScriptId) named '$($ScriptXML.ScriptName)' references folder $($ScriptXML.FolderId), this folder is no longer present. Setting to root folder."
                 Log-Write -FullLogPath $FullLogPath -LineValue "It is recomended that you move this script to a folder."
             
                 #Set to FolderID 0
