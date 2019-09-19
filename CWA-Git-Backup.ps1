@@ -1244,7 +1244,7 @@ else{
     $ScriptIDs += Get-SQLData $Query   
 }
 
-Log-Write -FullLogPath $FullLogPath -LineValue "$(@($ScriptIDs).count) scripts to process."
+Log-Write -FullLogPath $FullLogPath -LineValue "$(@($ScriptIDs).count) CWA Scripts to process."
 
 #Process each ScriptID
 $n = 0
