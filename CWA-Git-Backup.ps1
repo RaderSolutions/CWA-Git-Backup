@@ -177,7 +177,7 @@ Function Export-DBSchema {
 
     foreach($row in $rows.$nameCol){
         $filename = [System.IO.Path]::Combine($BackupPath, "$row.sql")        
-        $SQLQuery = "$createSQLQueryPrefix $MySqlDataBase.$row"
+        $SQLQuery = "$createSQLQueryPrefix ``$MySqlDataBase``.``$row``"
         ## silent continue due to certain tables failing to export config
         ## replace the auto_increment field to have sane diffs
         if($info_schema){
