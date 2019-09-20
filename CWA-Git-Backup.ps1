@@ -43,6 +43,9 @@ Param(
     $ScriptVersion = "2.0"
     
     $ErrorActionPreference = "Stop"
+
+    # Redirect all output from git on stderr to stdout so posh doesn't throw lots of red text to screen
+    $env:GIT_REDIRECT_STDERR = '2>&1'
     
     #Get/Save config info
     $ConfigFile = "$PSScriptRoot\CWA-Git-Backup-Config.xml"
@@ -81,7 +84,9 @@ Param(
             $default = $PSScriptRoot
             $Config.Settings.CredPath = "$(Read-Host "Path of credentials [$default]")"
             if ($Config.Settings.CredPath -eq '') {$Config.Settings.CredPath = $default}
-            $default = "c:\LTShare"
+            # Pull LTShare location from registry if possible, else default to default setting.
+            $default = (get-itemproperty -path "HKLM:\SOFTWARE\Wow6432Node\LabTech\Setup" -name "Local LTShare" -ErrorAction SilentlyContinue)."Local LTShare"
+            If ($default -eq $null) {$default = "c:\LTShare"}
             $Config.Settings.LTSharePath = "$(Read-Host "Path to LTShare from this machine [$default]")"
             if ($Config.Settings.LTSharePath -eq '') {$Config.Settings.LTSharePath = $default}
             $Config.Save($ConfigFile)
@@ -129,6 +134,10 @@ Param(
     $LogPath = ($Config.Settings.LogPath)
     $FullLogPath = [System.IO.Path]::Combine($LogPath, $LogName)
 
+    #Robocopy Log File Info
+    $LogNameRobo = "CWA-Export-robocopy.log"
+    $LogPath = ($Config.Settings.LogPath)
+    $FullLogPathRobo = [System.IO.Path]::Combine($LogPath, $LogNameRobo)
 
     #Location to the backp repository
     $BackupRoot = $Config.Settings.BackupRoot
@@ -153,7 +162,7 @@ Function New-BackupPath {
         [Parameter(Mandatory=$true)][string]$NewPath
     )
     $BackupPath = [System.IO.Path]::Combine($BackupRoot, $NewPath)
-    $null = New-Item -ItemType Directory -Force -Path $BackupPath
+    New-Item -ItemType Directory -Force -Path $BackupPath | Out-Null
     Set-Location $BackupPath
     Return $BackupPath
 }
@@ -175,7 +184,7 @@ Function Export-DBSchema {
 
     foreach($row in $rows.$nameCol){
         $filename = [System.IO.Path]::Combine($BackupPath, "$row.sql")        
-        $SQLQuery = "$createSQLQueryPrefix $MySqlDataBase.$row"
+        $SQLQuery = "$createSQLQueryPrefix ``$MySqlDataBase``.``$row``"
         ## silent continue due to certain tables failing to export config
         ## replace the auto_increment field to have sane diffs
         if($info_schema){
@@ -276,12 +285,12 @@ Function Log-Start{
 
     #Check if folder exists if not create    
     If((Test-Path -PathType Container -Path $LogPath) -eq $False){
-      New-Item -ItemType Directory -Force -Path $LogPath
+      New-Item -ItemType Directory -Force -Path $LogPath | Out-Null
     }
 
     #Create file and start logging
     If($(Test-Path -Path $FullLogPath) -ne $true) {
-        New-Item -Path $LogPath -Name $LogName -ItemType File
+        New-Item -Path $LogPath -Name $LogName -ItemType File | Out-Null
     }
 
     Add-Content -Path $FullLogPath -Value "***************************************************************************************************"
@@ -918,7 +927,7 @@ Function Export-LTScript {
         
             #Check if folder is no longer present. 
             if ($FolderData -eq $null) {
-                Log-Write -FullLogPath $FullLogPath -LineValue "ScriptID $($ScriptXML.ScriptId) references folder $($ScriptXML.FolderId), this folder is no longer present. Setting to root folder."
+                Log-Write -FullLogPath $FullLogPath -LineValue "ScriptID $($ScriptXML.ScriptId) named '$($ScriptXML.ScriptName)' references folder $($ScriptXML.FolderId), this folder is no longer present. Setting to root folder."
                 Log-Write -FullLogPath $FullLogPath -LineValue "It is recomended that you move this script to a folder."
             
                 #Set to FolderID 0
@@ -1095,7 +1104,7 @@ Function Export-Search {
     try{
         $FilePath = "$BackupPath\$([math]::floor($Search.SensID / 50) * 50)"
         #Create folder
-        $null = New-Item -ItemType Directory -Force -Path $FilePath
+        New-Item -ItemType Directory -Force -Path $FilePath | Out-Null
 
         #Save XML
         $FileName = "$FilePath\$($Search.SensId).xml"
@@ -1299,7 +1308,7 @@ if(Test-Path $LTShareSource){
     if($Verbose){"Robocopy beginning. This can take a while for a large LTShare"}
     ## for some reason the abstraction of Extension Filters into a variable makes it not function. Resolving the variables into a flat string before invoke-expression seems to fix it
     $cmd = @"
-Robocopy.exe /MIR "$LTShareSource" "$BackupPath" $LTShareExtensionFilter /XD ".*" "Uploads" /NC /MT /LOG:"$($env:TEMP)\robocopy.log" /R:3 /W:5 /NP /xa:H 
+Robocopy.exe /MIR "$LTShareSource" "$BackupPath" $LTShareExtensionFilter /XD ".*" "Uploads" /NC /MT /LOG:"$FullLogPathRobo" /R:3 /W:5 /NP /xa:H 
 "@		
     invoke-expression $cmd
 }else{
@@ -1357,6 +1366,8 @@ get-ChildItem -Recurse -File | ? {($_.name -replace '\.xml','') -notin $Searches
 if(Test-Path "$BackupRoot\.git"){
     "Git repo found, doing a push"
     $null = git.exe config --global core.safecrlf false
+    # Redirect all output from git on stderr to stdout as git's default config makes no sense on Windows
+    $env:GIT_REDIRECT_STDERR = '2>&1'
 
     $FoldersCommitted = @()        
 
@@ -1462,7 +1473,7 @@ This repo should contain xml files from all scripts in the CWA system. If the ex
 
 ## Script Links
 
-The scripts are sorted into folders based on their script ID, and [a table of contents should exist in this same directory](.\ToC.md) with mappings between script names and script IDs.
+The scripts are sorted into folders based on their script ID, and [a table of contents should exist in this same directory](./Scripts/ToC.md) with mappings between script names and script IDs.
 
 ## Other various systems 
 
@@ -1475,8 +1486,8 @@ Various DB properties/schema as well as CWA system definitions (groups, searches
     ## push the rest of the changed files
     $null = git.exe add --all
     $null = git.exe commit -m "Various files"
-    
-    git.exe push
+
+    git.exe push 
 }else{
     "[$BackupRoot] is not a git repo - skipping all git actions"
 }
