@@ -1,4 +1,4 @@
-﻿<#
+<#
 .SYNOPSIS
     Backs up all LabTech scripts.
 
