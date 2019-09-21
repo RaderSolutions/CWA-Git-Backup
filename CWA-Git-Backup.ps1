@@ -1507,12 +1507,15 @@ The scripts are sorted into folders based on their script ID, and [a table of co
 Various DB properties/schema as well as CWA system definitions (groups, searches, etc) are also backed up here
 
 "@ | Out-File "$BackupRoot\README.md"
+        git.exe add "$BackupRoot\README.md"
+        git.exe commit -m "Add README" | Out-Null
     }    
     
     Set-Location $BackupRoot
     ## push the rest of the changed files
-    $null = git.exe add --all
-    $null = git.exe commit -m "Various files"
+    ## very inefficient, hope to get rid of this one day
+    git.exe add --all | Out-Null
+    git.exe commit -m "Various files" | Out-Null
 
     git.exe push 
 }else{
