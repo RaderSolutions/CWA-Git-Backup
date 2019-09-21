@@ -45,12 +45,13 @@ Param(
     $ErrorActionPreference = "Stop"
 
     # Redirect all output from git on stderr to stdout so posh doesn't throw lots of red text to screen
-    $env:GIT_REDIRECT_STDERR = '2>&1'
+    #$env:GIT_REDIRECT_STDERR = '2>&1'
     
     #Get/Save config info
     $ConfigFile = "$PSScriptRoot\CWA-Git-Backup-Config.xml"
     if($(Test-Path $ConfigFile) -eq $false) {
         #Config file template
+## DBSchemaExclusions - an array of regex to match. If matching, the whole match is removed
         $Config = [xml]@'
 <Settings>
 	<LogPath></LogPath>
@@ -61,6 +62,12 @@ Param(
     <LastExport>0</LastExport>
     <LTSharePath></LTSharePath>
     <LTShareExtensionFilter>*.csv *.txt *.html *.xml *.htm *.log *.rtf *.ini *.sh *.ps1 *.psm1 *.inf *.vbs *.css *.bat *.js *.rdp *.crt *.reg *.cmd *.php</LTShareExtensionFilter>
+    <DBSchemaExclusions>
+        <a><![CDATA[[ ]+PARTITION.* VALUES LESS THAN .* ENGINE.*,]]></a>
+        <a><![CDATA[\(PARTITION.* VALUES LESS THAN .* ENGINE.*,]]></a>
+        <a><![CDATA[ PARTITION.* VALUES LESS THAN .* ENGINE.*\)]]></a>
+        <a><![CDATA[^[ ]+$]]></a>
+    </DBSchemaExclusions>
 </Settings>
 '@
         try {
@@ -188,10 +195,26 @@ Function Export-DBSchema {
         ## silent continue due to certain tables failing to export config
         ## replace the auto_increment field to have sane diffs
         if($info_schema){
-            (Get-SQLData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
+            $FileContent = (Get-SQLData $SQLQuery -info_schema -ErrorAction SilentlyContinue).$createCol | %{$_ -replace ' AUTO_INCREMENT=[0-9]*\b',''}
         }else{
-            (Get-SQLData $SQLQuery -ErrorAction SilentlyContinue).$createCol -replace ' AUTO_INCREMENT=[0-9]*\b','' | Out-File -Force $filename
+            $FileContent = (Get-SQLData $SQLQuery -ErrorAction SilentlyContinue).$createCol | %{$_ -replace ' AUTO_INCREMENT=[0-9]*\b',''}
         }
+        ## convert to string array
+        $FileContentReal = ($FileContent -replace "`r").split("`n")
+        foreach($Exclusion in $Config.Settings.DBSchemaExclusions.a.'#cdata-section'){
+            ## way too noisy
+            #if($Verbose){Log-Write -FullLogPath $FullLogPath -LineValue "Filtering [$Exclusion] from $filename"}
+            try{
+                $FileContentReal = $FileContentReal | % {$_ -replace $Exclusion,''}
+            }catch{
+                $ErrorMessage = $_.Exception.Message
+                Log-Error -FullLogPath $FullLogPath -ErrorDesc "Processing db exclusion [$Exclusion] from $filename - $ErrorMessage" -ExitGracefully $False
+            }
+            
+        }
+        ## exclude empty strings
+        $FileContentReal | ? {$_ -ne ''} | Out-File -Force $filename
+        
     }
     get-ChildItem $BackupPath -File | ? {($_.name -replace '\.sql','') -notin $rows.$nameCol} | remove-item -Force
 }
@@ -403,20 +426,23 @@ Function Log-Error{
   
   [CmdletBinding()]
   
-  Param ([Parameter(Mandatory=$true)][string]$FullLogPath, [Parameter(Mandatory=$true)][string]$ErrorDesc, [Parameter(Mandatory=$true)][boolean]$ExitGracefully)
+  Param (
+    [Parameter(Mandatory=$true)][string]$FullLogPath, 
+    [Parameter(Mandatory=$true)][string]$ErrorDesc, 
+    [Parameter(Mandatory=$true)][boolean]$ExitGracefully
+  )
   
   Process{
     Add-Content -Path $FullLogPath -Value "Error: An error has occurred [$ErrorDesc]."
   
-    Write-Error $ErrorDesc
-
     #Write to screen for debug mode
     Write-Debug "Error: An error has occurred [$ErrorDesc]."
     
     #If $ExitGracefully = True then run Log-Finish and exit script
     If ($ExitGracefully -eq $True){
+      Write-Error $ErrorDesc
       Log-Finish -FullLogPath $FullLogPath -Limit 50000
-      Breaåk
+      Break
     }
   }
 }
@@ -490,6 +516,7 @@ Function Log-Finish{
   
     if ($Limit){
         #Limit Log file to XX lines
+        ## roll logs instead of truncate
         (Get-Content $FullLogPath -tail $Limit -readcount 0) | Set-Content $FullLogPath -Force -Encoding Unicode
     }
     #Exit calling script if NoExit has not been specified or is set to False
@@ -1305,7 +1332,7 @@ if(Test-Path $LTShareSource){
     # LTShare accessible
     # include files explicitly by extension
     # exclude Uploads dir and any dirs that start with a dot
-    if($Verbose){"Robocopy beginning. This can take a while for a large LTShare"}
+    if($Verbose){Log-Write -FullLogPath $FullLogPath -LineValue "Robocopy beginning. This can take a while for a large LTShare"}
     ## for some reason the abstraction of Extension Filters into a variable makes it not function. Resolving the variables into a flat string before invoke-expression seems to fix it
     $cmd = @"
 Robocopy.exe /MIR "$LTShareSource" "$BackupPath" $LTShareExtensionFilter /XD ".*" "Uploads" /NC /MT /LOG:"$FullLogPathRobo" /R:3 /W:5 /NP /xa:H 
@@ -1367,13 +1394,13 @@ if(Test-Path "$BackupRoot\.git"){
     "Git repo found, doing a push"
     $null = git.exe config --global core.safecrlf false
     # Redirect all output from git on stderr to stdout as git's default config makes no sense on Windows
-    $env:GIT_REDIRECT_STDERR = '2>&1'
+    #$env:GIT_REDIRECT_STDERR = '2>&1'
 
     $FoldersCommitted = @()        
 
 
 ### CWA Scripts commits
-    if($Verbose){"CWA Scripts commits"}
+    if($Verbose){Log-Write -FullLogPath $FullLogPath -LineValue "CWA Scripts commits"}
     $FoldersCommitted += "Scripts"
     Set-Location $BackupRoot\$($FoldersCommitted[-1])
 
@@ -1389,20 +1416,20 @@ if(Test-Path "$BackupRoot\.git"){
         ## not doing individual commits on initial backup
         git.exe add .\
         $commitString = "CWA Scripts initial commit"
-        if($Verbose){"committing $commitString"}
+        if($Verbose){Log-Write -FullLogPath $FullLogPath -LineValue "committing $commitString"}
         $null = git.exe commit -m "$commitString"
     }else{
         foreach($user in $($changedFiles | Group-Object User).Name){     
-            $null = git add ./ToC.md   
+            git add ./ToC.md | Out-Null
             $changedFiles | ? User -eq $user | %{$null = git.exe add "$($_.RelativePath)"}
             $commitString =  "CWA Script(s) Modified by User $user"
-            if($Verbose){"committing $commitString"}
+            if($Verbose){Log-Write -FullLogPath $FullLogPath -LineValue "committing $commitString"}
             $null = git.exe commit -m $commitString
         }
     }
 
 ### LTShare commits (per file extension)
-    if($Verbose){"LTShare commits"}
+    if($Verbose){Log-Write -FullLogPath $FullLogPath -LineValue "LTShare commits"}
     $FoldersCommitted += "LTShare"
     Set-Location $BackupRoot\$($FoldersCommitted[-1])
 
@@ -1410,7 +1437,7 @@ if(Test-Path "$BackupRoot\.git"){
         ## not doing individual commits on initial backup
         git.exe add .\
         $commitString = "LTShare initial commit"
-        if($Verbose){"committing $commitString"}
+        if($Verbose){Log-Write -FullLogPath $FullLogPath -LineValue "committing $commitString"}
         $null = git.exe commit -m "$commitString"
     }else{
         $files = Get-ChildItem -Recurse -File 
@@ -1419,7 +1446,7 @@ if(Test-Path "$BackupRoot\.git"){
         foreach($ext in $extensions){
             $null = $files | ? Extension -eq $ext | %{$null = git.exe add "$(resolve-path -relative $_.fullname)"}
             $commitString = "Changes from .\$($FoldersCommitted[-1]) with extension $ext"
-            if($Verbose){"committing $commitString"}
+            if($Verbose){Log-Write -FullLogPath $FullLogPath -LineValue "committing $commitString"}
             $null = git.exe commit -m "$commitString"
         }
     }
@@ -1432,11 +1459,11 @@ if(Test-Path "$BackupRoot\.git"){
 #   Set-Location $BackupRoot
 #   $null = $files | %{$null = git.exe add "$(resolve-path -relative $_.fullname)"}
 #   $commitString = "Changes from .\$($FoldersCommitted[-1])"
-#   if($Verbose){"committing $commitString"}
+#   if($Verbose){Log-Write -FullLogPath $FullLogPath -LineValue "committing $commitString"}
 #   $null = git.exe commit -m "$commitString"
 
 ### all other folder commits
-    if($Verbose){"Adding all non-special folders"}
+    if($Verbose){Log-Write -FullLogPath $FullLogPath -LineValue "Adding all non-special folders"}
     Set-Location $BackupRoot
     $dirs = @()
     $dirs += Get-ChildItem -Directory -exclude $FoldersCommitted
@@ -1450,13 +1477,13 @@ if(Test-Path "$BackupRoot\.git"){
             $RelativePath = $dir | Resolve-Path -Relative
             git.exe add "$RelativePath\."
             $commitString = "Changes from $RelativePath"
-            if($Verbose){"committing $commitString"}
+            if($Verbose){Log-Write -FullLogPath $FullLogPath -LineValue "committing $commitString"}
             $null = git.exe commit -m "$commitString"
         }
     }
 
 ### finalize git push
-    if($Verbose){"Finalizing commits and adding any straggler files"}
+    if($Verbose){Log-Write -FullLogPath $FullLogPath -LineValue "Finalizing commits and adding any straggler files"}
     # Build default README.md if it doesn't exist
     if($(Get-Content "README.md" -ErrorAction SilentlyContinue | Measure-Object).count -gt 1){
         # Readme contains more than one line of content. not rebuilding
