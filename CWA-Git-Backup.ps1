@@ -181,12 +181,20 @@ Function Export-DBSchema {
         [Parameter(Mandatory=$true,Position=2)][string]$nameCol,
         [Parameter(Mandatory=$true,Position=3)][string]$createCol,
         [Parameter(Mandatory=$true,Position=4)][string]$createSQLQueryPrefix,
-        [Parameter(Mandatory=$true,Position=5)][string]$listSQLQuery
+        [Parameter(Mandatory=$true,Position=5)][string]$listSQLQuery,
+        [Parameter(Mandatory=$false,Position=6)][string]$listSQLQueryAdditionalConditions
     )
+
+    ## $listSQLQueryAdditionalConditions will define additional conditions for the schema export, but will not consider it for deletions. This essentially delays diffs for things that match the $listSQLQueryAdditionalConditions
+    $listSQLQueryReal = $listSQLQuery
+    if($listSQLQueryAdditionalConditions){
+        $listSQLQueryReal = "$listSQLQuery AND $listSQLQueryAdditionalConditions"
+    }
+
     if($info_schema){
-        $rows = Get-SQLData $listSQLQuery -info_schema
+        $rows = Get-SQLData $listSQLQueryReal -info_schema
     }else{
-        $rows = Get-SQLData $listSQLQuery
+        $rows = Get-SQLData $listSQLQueryReal
     }
 
     foreach($row in $rows.$nameCol){
@@ -215,6 +223,11 @@ Function Export-DBSchema {
         ## exclude empty strings
         $FileContentReal | ? {$_ -ne ''} | Out-File -Force $filename
         
+    }
+    if($info_schema){
+        $rows = Get-SQLData $listSQLQuery -info_schema
+    }else{
+        $rows = Get-SQLData $listSQLQuery
     }
     get-ChildItem $BackupPath -File | ? {($_.name -replace '\.sql','') -notin $rows.$nameCol} | remove-item -Force
 }
@@ -1174,7 +1187,7 @@ Function Rebuild-GitConfig {
     #
     #.DESCRIPTION
     #Prompts user for the repo URL. This repo is then cloned into the backupdirectory and pulled/pushed everytime this script finds changes in LT scripts. 
-    #The URL must have embedded credentials as such: https://<username>:<password>@fqdn.com/repo.git
+    #The URL must have embedded credentials either with ssh keys or as such: https://<username>:<password>@fqdn.com/repo.git
     #Push/pull will fail if git config doesn't include credentials
     #
     #.EXAMPLE
@@ -1188,7 +1201,7 @@ Function Rebuild-GitConfig {
     Remove-Item -Recurse -Force "$BackupRoot.old" -ErrorAction SilentlyContinue
     
     Move-Item "$BackupRoot" "$BackupRoot.old" -Force
-    mkdir "$BackupRoot"
+    mkdir "$BackupRoot" -ErrorAction Stop
 
     $RepoUrl = Read-Host "Enter the remote URL for git Repo (ensure ssh keys are setup first). Or type 'local' to initialize a local git repo." 
     if($RepoURL -eq 'local' -or $RepoURL -eq ''){
@@ -1352,7 +1365,7 @@ Export-DBSchema -info_schema $BackupPath "table_name" "Create View" "SHOW CREATE
 
 ####
 $BackupPath = New-BackupPath "$TopLevel\table_schema"
-Export-DBSchema -info_schema $BackupPath "table_name" "Create Table" "SHOW CREATE TABLE" "select table_name from tables where table_type = 'BASE TABLE' and table_schema = '$MySqlDatabase'"
+Export-DBSchema -info_schema $BackupPath "table_name" "Create Table" "SHOW CREATE TABLE" "select table_name from tables where table_type = 'BASE TABLE' and table_schema = '$MySqlDatabase'" "create_time < DATE_ADD(NOW(),INTERVAL -1 HOUR)"
 
 ####
 $BackupPath = New-BackupPath "$TopLevel\procedures"
